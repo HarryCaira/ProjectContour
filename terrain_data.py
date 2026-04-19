@@ -1,12 +1,15 @@
 from __future__ import annotations
+import logging
 from dataclasses import dataclass
 import numpy as np
 from scipy.spatial import cKDTree
 from coordinate_transform import LonLatToENU
 
+log = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
-class Terrain_ENU:
+class EnuTerrain:
     """
     Represents terrain elevation data in ENU coordinates.
 
@@ -53,7 +56,7 @@ class Terrain_ENU:
 
         return self.u_grid.ravel()[indices]
 
-    def downsample(self, target_size: int = 500) -> Terrain_ENU:
+    def downsample(self, target_size: int = 500) -> EnuTerrain:
         """
         Downsample terrain for visualization or faster processing.
 
@@ -66,10 +69,10 @@ class Terrain_ENU:
         height, width = self.shape
         step = max(1, max(height, width) // target_size)
 
-        return Terrain_ENU(e_grid=self.e_grid[::step, ::step], n_grid=self.n_grid[::step, ::step], u_grid=self.u_grid[::step, ::step])
+        return EnuTerrain(e_grid=self.e_grid[::step, ::step], n_grid=self.n_grid[::step, ::step], u_grid=self.u_grid[::step, ::step])
 
     @classmethod
-    def new(cls, heightmap: np.ndarray, tiles: list, zoom: int, transform: LonLatToENU) -> Terrain_ENU:
+    def new(cls, heightmap: np.ndarray, tiles: list, zoom: int, transform: LonLatToENU) -> EnuTerrain:
         """
         Convert heightmap from tile coordinates to ENU coordinates.
 
@@ -82,7 +85,7 @@ class Terrain_ENU:
         Returns:
             TerrainData with ENU coordinate grids
         """
-        print("Converting heightmap to ENU coordinates...")
+        log.info("Converting heightmap to ENU coordinates...")
         height, width = heightmap.shape
 
         # Get tile bounds
@@ -117,8 +120,7 @@ class Terrain_ENU:
         n_grid = enu_coords[:, 1].reshape(height, width)
         u_grid = heightmap.copy()
 
-        print("ENU conversion complete!")
-        e_bounds, n_bounds, _ = cls(e_grid, n_grid, u_grid).bounds
-        print(f"Terrain ENU bounds: E=[{e_bounds[0]:.1f}, {e_bounds[1]:.1f}], N=[{n_bounds[0]:.1f}, {n_bounds[1]:.1f}]")
-
-        return cls(e_grid=e_grid, n_grid=n_grid, u_grid=u_grid)
+        result = cls(e_grid=e_grid, n_grid=n_grid, u_grid=u_grid)
+        e_bounds, n_bounds, _ = result.bounds
+        log.info("ENU conversion complete: E=[%.1f, %.1f], N=[%.1f, %.1f]", e_bounds[0], e_bounds[1], n_bounds[0], n_bounds[1])
+        return result

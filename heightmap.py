@@ -1,6 +1,9 @@
+import logging
 from tile_client import MapboxTileClient, decode_terrain_rgb
 import numpy as np
-from route import RasterTile
+from coordinate_transform import RasterTile
+
+log = logging.getLogger(__name__)
 
 
 def create_heightmap_from_tiles(client: MapboxTileClient, tile_coords: list[RasterTile]) -> np.ndarray:
@@ -25,7 +28,7 @@ def create_heightmap_from_tiles(client: MapboxTileClient, tile_coords: list[Rast
     # Fetch all tiles
     tiles = {}
     for tile in tile_coords:
-        print(f"Fetching tile {tile.zoom}/{tile.x}/{tile.y}...")
+        log.debug("Fetching tile %d/%d/%d", tile.zoom, tile.x, tile.y)
         png_bytes = client.fetch_tile(tile.zoom, tile.x, tile.y)
         tiles[(tile.x, tile.y)] = decode_terrain_rgb(png_bytes)
 
@@ -45,7 +48,6 @@ def create_heightmap_from_tiles(client: MapboxTileClient, tile_coords: list[Rast
         col = x - min_x
         heightmap[row * 256 : (row + 1) * 256, col * 256 : (col + 1) * 256] = tile_data
 
-    print(f"Created heightmap: {heightmap.shape} ({len(tiles)} tiles)")
-    print(f"Elevation range: {heightmap.min():.1f}m to {heightmap.max():.1f}m")
+    log.info("Created heightmap: %s from %d tiles, elevation %.1fm to %.1fm", heightmap.shape, len(tiles), heightmap.min(), heightmap.max())
 
     return heightmap

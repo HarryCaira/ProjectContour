@@ -65,6 +65,8 @@ class MapboxTileClient:
     # Public API
     # ------------------------------
 
+    MAX_RATE_LIMIT_RETRIES = 3
+
     def fetch_tile(self, z: int, x: int, y: int) -> bytes:
         """
         Fetch a tile. Returns PNG bytes.
@@ -80,24 +82,25 @@ class MapboxTileClient:
         url = f"{self.BASE_URL}/{z}/{x}/{y}.pngraw"
         params = {"access_token": self.token}
 
-        response = self.http.get(url, params=params, timeout=10)
+        for attempt in range(self.MAX_RATE_LIMIT_RETRIES + 1):
+            response = self.http.get(url, params=params, timeout=10)
 
-        # Handle rate limit backoff manually (429)
-        if response.status_code == 429:
-            retry_after = int(response.headers.get("Retry-After", 2))
-            time.sleep(retry_after)
-            return self.fetch_tile(z, x, y)
+            if response.status_code == 429:
+                if attempt == self.MAX_RATE_LIMIT_RETRIES:
+                    raise RuntimeError(f"Tile {z}/{x}/{y} still rate-limited after {self.MAX_RATE_LIMIT_RETRIES} retries")
+                retry_after = int(response.headers.get("Retry-After", 2))
+                time.sleep(retry_after)
+                continue
 
-        if response.status_code != 200:
-            raise RuntimeError(f"Tile fetch failed [{response.status_code}]: {response.text}")
+            if response.status_code != 200:
+                raise RuntimeError(f"Tile fetch failed [{response.status_code}]: {response.text}")
 
-        data = response.content
+            data = response.content
+            if self.cache:
+                self.cache.set(z, x, y, data)
+            return data
 
-        # Save to cache
-        if self.cache:
-            self.cache.set(z, x, y, data)
-
-        return data
+        raise RuntimeError(f"Unreachable: exhausted retries for tile {z}/{x}/{y}")
 
 
 def decode_terrain_rgb(png_bytes: bytes) -> np.ndarray:

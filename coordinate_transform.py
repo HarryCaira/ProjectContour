@@ -50,25 +50,16 @@ class RasterTile:
     x: int
     y: int
 
-@dataclass(frozen=True)
-class LonLatToRasterTile:
-    def lonlat_to_tile(self, lon: float, lat: float, zoom: int) -> RasterTile:
-        """
-        Convert a single lon/lat coordinate to tile coordinates at the given zoom level.
-        Uses Web Mercator projection (EPSG:3857).
-        
-        Args:
-            lon: Longitude in degrees
-            lat: Latitude in degrees
-            zoom: Zoom level
-            
-        Returns:
-            RasterTile with x, y tile indices
-        """
-        n = 2**zoom
-        x_tile = int((lon + 180.0) / 360.0 * n)
-        
-        lat_rad = np.radians(lat)
-        y_tile = int((1.0 - np.arcsinh(np.tan(lat_rad)) / np.pi) / 2.0 * n)
 
-        return RasterTile(zoom=zoom, x=x_tile, y=y_tile)
+def lonlat_to_tile(lon: float, lat: float, zoom: int) -> RasterTile:
+    """
+    Convert a single lon/lat coordinate to tile coordinates at the given zoom level.
+    Uses Web Mercator projection (EPSG:3857).
+    """
+    n = 2**zoom
+    x_tile = int((lon + 180.0) / 360.0 * n)
+
+    lat_rad = np.radians(lat)
+    y_tile = int((1.0 - np.arcsinh(np.tan(lat_rad)) / np.pi) / 2.0 * n)
+
+    return RasterTile(zoom=zoom, x=x_tile, y=y_tile)

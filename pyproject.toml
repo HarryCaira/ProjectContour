@@ -14,6 +14,8 @@ dependencies = [
     "pytest>=8.4.2",
     "requests>=2.32.5",
     "ruff>=0.14.4",
+    "scipy>=1.14.0",
+    "trimesh>=4.5.0",
 ]
 
 [tool.ruff]

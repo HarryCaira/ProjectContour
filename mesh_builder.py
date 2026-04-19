@@ -1,7 +1,9 @@
 from __future__ import annotations
+import logging
 import numpy as np
 import trimesh
-from typing import Tuple
+
+log = logging.getLogger(__name__)
 
 
 def create_terrain_mesh(
@@ -9,50 +11,12 @@ def create_terrain_mesh(
     terrain_n: np.ndarray,
     terrain_u: np.ndarray,
     base_height: float = 10.0,
-    route_e: np.ndarray | None = None,
-    route_n: np.ndarray | None = None,
-    route_u: np.ndarray | None = None,
-    route_width: float = 2.0,
-    route_depth: float = 1.0,
 ) -> trimesh.Trimesh:
     """
-    Create a manifold 3D mesh from terrain data.
-
-    Args:
-        terrain_e: 2D array of East coordinates
-        terrain_n: 2D array of North coordinates
-        terrain_u: 2D array of elevation (Up)
-        base_height: Height of the base below minimum elevation
-        route_e: Optional route East coordinates
-        route_n: Optional route North coordinates
-        route_u: Optional route elevations
-        route_width: Width of route trench/ridge
-        route_depth: Depth of route feature
-
-    Returns:
-        trimesh.Trimesh: Watertight 3D mesh ready for export
+    Create a watertight 3D mesh from terrain grids (E/N/U), with a flat base
+    `base_height` below the minimum elevation.
     """
     height, width = terrain_u.shape
-
-    # Modify terrain to include route trench/ridge
-    if route_e is not None and route_n is not None and route_u is not None:
-        print(f"Adding route to terrain ({len(route_e)} points, width={route_width}m, height={'raised' if route_depth < 0 else 'carved'} {abs(route_depth)}m)...")
-
-        # For each terrain point, check if it's near the route
-        for i in range(height):
-            for j in range(width):
-                te, tn = terrain_e[i, j], terrain_n[i, j]
-
-                # Find minimum distance to route
-                distances = np.sqrt((route_e - te) ** 2 + (route_n - tn) ** 2)
-                min_dist = distances.min()
-
-                # If within route width, modify elevation
-                if min_dist < route_width / 2:
-                    # Smoothly interpolate height based on distance
-                    factor = 1.0 - (min_dist / (route_width / 2))
-                    # Negative route_depth means raised (subtract negative = add)
-                    terrain_u[i, j] -= route_depth * factor
 
     # Create vertices for the top surface
     vertices = []
@@ -139,31 +103,8 @@ def create_terrain_mesh(
     # Create the complete mesh
     mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=True)
 
-    print(f"Mesh: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
-    print(f"  Watertight: {mesh.is_watertight}")
-    print(f"  Manifold: {mesh.is_winding_consistent}")
+    log.info("Terrain mesh: %d vertices, %d faces (watertight=%s, manifold=%s)", len(mesh.vertices), len(mesh.faces), mesh.is_watertight, mesh.is_winding_consistent)
 
-    return mesh
-
-
-def simplify_mesh(mesh: trimesh.Trimesh, target_faces: int = 50000) -> trimesh.Trimesh:
-    """
-    Simplify mesh to reduce file size while preserving shape.
-
-    Args:
-        mesh: Input mesh
-        target_faces: Target number of faces
-
-    Returns:
-        Simplified mesh
-    """
-    if len(mesh.faces) > target_faces:
-        print(f"Simplifying mesh from {len(mesh.faces)} to ~{target_faces} faces...")
-        try:
-            mesh = mesh.simplify_quadric_decimation(target_faces)
-        except (ImportError, ModuleNotFoundError):
-            print("  Warning: fast_simplification not available, skipping simplification")
-            print("  Install with: pip install fast-simplification")
     return mesh
 
 
@@ -186,7 +127,7 @@ def scale_mesh_for_printing(mesh: trimesh.Trimesh, target_size_mm: float = 100.0
     # Calculate scale factor (meters to mm)
     scale_factor = target_size_mm / (max_size_m * 1000)
 
-    print(f"Scaling from {max_size_m:.1f}m to {target_size_mm}mm (scale: {scale_factor:.6f})")
+    log.info("Scaling from %.1fm to %smm (scale: %.6f)", max_size_m, target_size_mm, scale_factor)
 
     # Scale the mesh
     mesh.apply_scale(scale_factor)
@@ -297,8 +238,6 @@ def create_route_ribbon_mesh(
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=True)
     mesh.merge_vertices()
 
-    print(f"Route ribbon mesh: {len(mesh.vertices)} vertices, {len(mesh.faces)} faces")
-    print(f"  Watertight: {mesh.is_watertight}")
-    print(f"  Manifold: {mesh.is_winding_consistent}")
+    log.info("Route ribbon mesh: %d vertices, %d faces (watertight=%s, manifold=%s)", len(mesh.vertices), len(mesh.faces), mesh.is_watertight, mesh.is_winding_consistent)
 
     return mesh
