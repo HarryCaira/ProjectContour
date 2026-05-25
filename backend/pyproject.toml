@@ -18,6 +18,8 @@ dependencies = [
     "gpxpy>=1.6.2",
     "mapbox-vector-tile>=2.1.0",
     "triangle>=20230923",
+    "networkx>=3.4",
+    "manifold3d>=2.5",
 ]
 
 [project.optional-dependencies]
