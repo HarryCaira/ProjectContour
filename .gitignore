@@ -4,3 +4,15 @@ __pycache__/
 .ipynb_checkpoints/
 *.png
 .DS_Store
+
+.venv/
+.env
+
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+terrain_cache/
+*.stl
+*.glb
