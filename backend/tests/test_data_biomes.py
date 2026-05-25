@@ -8,12 +8,18 @@ import numpy as np
 import pytest
 from shapely.geometry import Polygon
 
+import responses
+
 from contour.data.biomes import (
     _convert_to_lonlat,
     extract_water_polygons_enu,
+    fetch_water_polygons,
 )
+from contour.framing.hex import HexFrame
 from contour.geo.tiles import RasterTile
 from contour.geo.transforms import LocalENU
+from contour.http.cache import TileCache
+from contour.http.client import HttpClient
 
 
 def _encode_water_tile(polygons_in_extent: list[Polygon], extent: int = 4096) -> bytes:
@@ -169,3 +175,88 @@ def test_extract_polygon_near_enu_origin():
     centroid = result[0].centroid
     assert abs(centroid.x) < 1500
     assert abs(centroid.y) < 1500
+
+
+# ---------- fetch_water_polygons (integration with mocked HTTP) ----------
+
+
+def _add_mvt_response(encoded: bytes) -> None:
+    responses.add(
+        responses.GET,
+        responses.matchers.re.compile(r"https://api\.mapbox\.com/v4/mapbox\.mapbox-streets-v8/.*"),
+        body=encoded,
+        status=200,
+    )
+
+
+@responses.activate
+def test_fetch_water_polygons_end_to_end(tmp_path):
+    frame = HexFrame(centre_lon=-0.1, centre_lat=51.5, circumradius_m=400)
+    extent = 4096
+    encoded = mapbox_vector_tile.encode(
+        [
+            {
+                "name": "water",
+                "features": [
+                    {
+                        "geometry": Polygon([(200, 200), (3800, 200), (3800, 3800), (200, 3800)]),
+                        "properties": {},
+                    }
+                ],
+            }
+        ],
+        default_options={"extents": extent},
+    )
+    _add_mvt_response(encoded)
+
+    client = HttpClient(backoff_factor=0.0)
+    cache = TileCache(tmp_path)
+    polygons = fetch_water_polygons(frame, client, cache, mapbox_token="test-token", zoom=14)
+
+    assert len(polygons) > 0
+    for p in polygons:
+        assert p.is_valid
+        assert not p.is_empty
+        # Every clipped polygon must lie inside the hex.
+        assert frame.polygon_enu().buffer(0.01).contains(p)
+
+
+@responses.activate
+def test_fetch_water_polygons_uses_cache(tmp_path):
+    frame = HexFrame(centre_lon=-0.1, centre_lat=51.5, circumradius_m=400)
+    encoded = mapbox_vector_tile.encode(
+        [
+            {
+                "name": "water",
+                "features": [
+                    {"geometry": Polygon([(200, 200), (3800, 200), (3800, 3800), (200, 3800)]), "properties": {}}
+                ],
+            }
+        ],
+    )
+    _add_mvt_response(encoded)
+
+    client = HttpClient(backoff_factor=0.0)
+    cache = TileCache(tmp_path)
+
+    fetch_water_polygons(frame, client, cache, mapbox_token="test-token", zoom=14)
+    calls_first = len(responses.calls)
+
+    fetch_water_polygons(frame, client, cache, mapbox_token="test-token", zoom=14)
+    calls_second = len(responses.calls)
+
+    assert calls_first > 0
+    assert calls_second == calls_first  # no new HTTP requests on second pass
+
+
+@responses.activate
+def test_fetch_water_polygons_returns_empty_when_no_water(tmp_path):
+    frame = HexFrame(centre_lon=-0.1, centre_lat=51.5, circumradius_m=400)
+    encoded_no_water = mapbox_vector_tile.encode([{"name": "roads", "features": []}])
+    _add_mvt_response(encoded_no_water)
+
+    client = HttpClient(backoff_factor=0.0)
+    cache = TileCache(tmp_path)
+    polygons = fetch_water_polygons(frame, client, cache, mapbox_token="test-token", zoom=14)
+
+    assert polygons == []
