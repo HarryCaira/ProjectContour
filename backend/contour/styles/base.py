@@ -16,12 +16,14 @@ class NeutralScene:
 
     Each field is a watertight mesh in the shared ENU coordinate frame; styles
     receive this and decide how to colour, finish, and combine them into a MeshKit.
+    Only `land` is guaranteed to be present; everything else is optional so the
+    style can decide whether to include or omit each part.
     """
 
     land: trimesh.Trimesh
-    water: trimesh.Trimesh | None
-    route: trimesh.Trimesh | None
-    plinth: trimesh.Trimesh
+    water: trimesh.Trimesh | None = None
+    route: trimesh.Trimesh | None = None
+    plinth: trimesh.Trimesh | None = None
 
 
 class Style(ABC):
