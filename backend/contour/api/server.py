@@ -5,6 +5,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,6 +14,8 @@ from contour.api.routes import router
 from contour.http.cache import TileCache
 from contour.http.client import HttpClient
 from contour.storage.gpx import GpxStore
+
+load_dotenv(find_dotenv(usecwd=True))
 
 
 @asynccontextmanager
