@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 from shapely.geometry import Polygon
 
-from contour.framing.hex import HexFrame
-from contour.mesh.hex_clip import land_polygon, triangulate_land
+from contour.hex_frame import HexFrame
+from contour.hex_clip import land_polygon, triangulate_land
 
 
 def _hex_polygon(r: float = 1000.0) -> Polygon:

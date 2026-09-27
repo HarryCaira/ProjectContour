@@ -5,7 +5,7 @@ import pytest
 import requests
 import responses
 
-from contour.http.client import HttpClient
+from contour.http_client import HttpClient
 
 
 @responses.activate

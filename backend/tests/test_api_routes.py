@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from contour.api.errors import ContourError, register_exception_handlers
+from contour.errors import ContourError, register_exception_handlers
 
 SIMPLE_GPX = b"""<?xml version="1.0"?>
 <gpx version="1.1" creator="test">
@@ -59,7 +59,7 @@ def _add_mapbox_mocks() -> None:
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CONTOUR_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("MAPBOX_TOKEN", "test-token")
-    from contour.api.server import create_app
+    from contour.server import create_app
 
     app = create_app()
     with TestClient(app) as c:
@@ -182,7 +182,7 @@ def test_mesh_409_on_hash_mismatch(client):
 def test_mesh_500_when_token_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("CONTOUR_DATA_DIR", str(tmp_path))
     monkeypatch.delenv("MAPBOX_TOKEN", raising=False)
-    from contour.api.server import create_app
+    from contour.server import create_app
 
     app = create_app()
     with TestClient(app) as c:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from contour.geo.tiles import (
+from contour.tiles import (
     RasterTile,
     lonlat_to_pixel,
     lonlat_to_tile,

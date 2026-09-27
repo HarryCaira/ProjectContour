@@ -6,9 +6,9 @@ import math
 import numpy as np
 import pytest
 
-from contour.geo.transforms import LocalENU
-from contour.mesh.sampling import sample_at_enu
-from contour.schema.heightmap import Heightmap
+from contour.coordinates import LocalENU
+from contour.sampling import sample_at_enu
+from contour.heightmap import Heightmap
 
 
 def _tile_at(lon: float, lat: float, zoom: int) -> tuple[int, int]:

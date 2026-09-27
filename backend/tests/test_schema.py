@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from contour.schema.settings import Settings
+from contour.settings import Settings
 
 VALID_SOURCE = {"type": "gpx", "id": "abc123", "sha256": "deadbeef" * 8}
 

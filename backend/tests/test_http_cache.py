@@ -1,7 +1,7 @@
 """Tests for the disk-backed TileCache."""
 from __future__ import annotations
 
-from contour.http.cache import TileCache
+from contour.tile_cache import TileCache
 
 
 def test_cache_returns_none_for_missing(tmp_path):

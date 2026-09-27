@@ -5,8 +5,8 @@ import math
 
 import pytest
 
-from contour.framing.hex import HexFrame
-from contour.mesh.plinth import build_plinth_mesh
+from contour.hex_frame import HexFrame
+from contour.plinth_mesh import build_plinth_mesh
 
 
 def test_plinth_is_watertight():

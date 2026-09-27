@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from shapely.geometry import Polygon
 
-from contour.mesh.water import build_water_mesh
+from contour.water_mesh import build_water_mesh
 
 
 def test_no_polygons_returns_none():

@@ -8,16 +8,16 @@ import pytest
 import responses
 from PIL import Image
 
-from contour.data.terrain import (
+from contour.terrain_data import (
     decode_terrain_rgb,
     fetch_heightmap,
     select_zoom,
     stitch_heightmap,
 )
-from contour.framing.hex import HexFrame
-from contour.http.cache import TileCache
-from contour.http.client import HttpClient
-from contour.schema.settings import Physical
+from contour.hex_frame import HexFrame
+from contour.tile_cache import TileCache
+from contour.http_client import HttpClient
+from contour.settings import Physical
 
 
 def _make_terrain_png(rgb: np.ndarray) -> bytes:

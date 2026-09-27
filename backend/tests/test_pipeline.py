@@ -10,11 +10,11 @@ import responses
 from PIL import Image
 from shapely.geometry import Polygon
 
-from contour.http.cache import TileCache
-from contour.http.client import HttpClient
+from contour.tile_cache import TileCache
+from contour.http_client import HttpClient
 from contour.pipeline import PipelineDependencies, build_kit
-from contour.schema.route import Route
-from contour.schema.settings import Settings
+from contour.route import Route
+from contour.settings import Settings
 
 
 def _make_png(rgb: np.ndarray) -> bytes:

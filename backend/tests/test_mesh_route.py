@@ -6,10 +6,10 @@ import math
 import numpy as np
 import pytest
 
-from contour.framing.hex import HexFrame
-from contour.mesh.route import build_route_mesh
-from contour.schema.heightmap import Heightmap
-from contour.schema.route import Route
+from contour.hex_frame import HexFrame
+from contour.route_mesh import build_route_mesh
+from contour.heightmap import Heightmap
+from contour.route import Route
 
 
 def _tile_at(lon: float, lat: float, zoom: int) -> tuple[int, int]:

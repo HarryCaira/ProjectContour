@@ -7,8 +7,8 @@ import numpy as np
 import pytest
 from shapely.geometry import Point
 
-from contour.framing.hex import HexFrame, hex_frame_for_route
-from contour.schema.route import Route
+from contour.hex_frame import HexFrame, hex_frame_for_route
+from contour.route import Route
 
 
 def _route(lats, lons, eles=None) -> Route:
