@@ -1,3 +1,4 @@
+import { readMeshStream, type MeshProgress } from "@/lib/mesh-stream";
 import type { Settings } from "@/lib/settings";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
@@ -15,6 +16,7 @@ export interface KitMetadata {
 
 export interface MeshResult {
   glb: ArrayBuffer;
+  physicalSizeMm?: number;
   metadata: KitMetadata;
 }
 
@@ -26,23 +28,20 @@ export async function uploadGpx(file: File): Promise<UploadResponse> {
   return r.json();
 }
 
-export async function fetchMesh(settings: Settings): Promise<MeshResult> {
-  const r = await fetch(`${BASE}/mesh`, {
+export async function fetchMesh(
+  settings: Settings,
+  onProgress: (progress: MeshProgress) => void,
+  signal?: AbortSignal,
+): Promise<MeshResult> {
+  const r = await fetch(`${BASE}/mesh/stream`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(settings),
+    signal,
   });
   if (!r.ok) throw await asError(r);
-  return {
-    glb: await r.arrayBuffer(),
-    metadata: {
-      parts: (r.headers.get("x-kit-parts") ?? "").split(",").filter(Boolean),
-      triangles: (r.headers.get("x-kit-triangles") ?? "")
-        .split(",")
-        .filter(Boolean)
-        .map((n) => parseInt(n, 10)),
-    },
-  };
+  if (!r.body) throw new Error("Your browser couldn't receive the model. Please try again.");
+  return { ...await readMeshStream(r.body, onProgress), physicalSizeMm: settings.physical.sizeMm };
 }
 
 export async function downloadExport(settings: Settings): Promise<Blob> {

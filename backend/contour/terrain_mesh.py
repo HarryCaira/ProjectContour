@@ -1,12 +1,16 @@
 """Land mesh: heightmap + (hex \\ water) polygon -> watertight 3D solid."""
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
+import shapely
 import trimesh
 from shapely.geometry import Polygon
 
 from contour.hex_frame import HexFrame
-from contour.hex_clip import triangulate_land
+from contour.hex_clip import triangulate_land, land_polygon
+from contour.terrain_refinement import refine_terrain
 from contour.sampling import sample_at_enu
 from contour.heightmap import Heightmap
 
@@ -17,6 +21,10 @@ def build_land_mesh(
     water_polygons: list[Polygon],
     base_z: float,
     grid_points_per_side: int = 100,
+    water_levels: list[float] | None = None,
+    surface_tolerance_m: float | None = None,
+    sample_spacing_m: float | None = None,
+    checkpoint: Callable[[], None] | None = None,
 ) -> trimesh.Trimesh:
     """Build a watertight land solid from the heightmap, clipped to the hex with
     water polygons as holes.
@@ -28,12 +36,44 @@ def build_land_mesh(
              from heightmap elevation down to `base_z`.
     """
     hex_poly = hex_frame.polygon_enu()
+    if water_polygons and hex_poly.difference(shapely.union_all(water_polygons)).is_empty:
+        return trimesh.Trimesh()
     local_enu = hex_frame.local_enu()
 
     tri = triangulate_land(hex_poly, water_polygons, grid_points_per_side=grid_points_per_side)
     vertices_2d = tri.vertices
 
-    elevations = sample_at_enu(heightmap, vertices_2d, local_enu)
+    if water_levels is not None and len(water_levels) != len(water_polygons):
+        raise ValueError("Each water polygon needs a surface level")
+
+    shorelines = shapely.STRtree([polygon.boundary for polygon in water_polygons])
+
+    def sample_surface(points_2d: np.ndarray) -> np.ndarray:
+        elevations = sample_at_enu(heightmap, points_2d, local_enu)
+        if water_levels is not None:
+            points = shapely.points(points_2d)
+            tolerance = max(hex_frame.circumradius_m * 1e-8, 1e-8)
+            blend_width = 4 * sample_spacing_m if sample_spacing_m is not None else tolerance
+            point_ids, shoreline_ids = shorelines.query(points, predicate="dwithin", distance=blend_width)
+            # Most terrain samples are nowhere near a shoreline. Only measure
+            # the nearby candidates, rather than every sample against every lake.
+            for index in np.unique(shoreline_ids):
+                ids = point_ids[shoreline_ids == index]
+                distance = shapely.distance(points[ids], water_polygons[index].boundary)
+                level = water_levels[index]
+                if sample_spacing_m is not None:
+                    blend = np.clip(distance / blend_width, 0, 1)
+                    elevations[ids] = level * (1 - blend) + elevations[ids] * blend
+                elevations[ids[distance <= tolerance]] = level
+        return elevations
+
+    if surface_tolerance_m is not None:
+        if sample_spacing_m is None:
+            raise ValueError("Adaptive terrain requires a reference spacing")
+        tri = refine_terrain(tri, sample_surface, land_polygon(hex_poly, water_polygons),
+                             sample_spacing_m, surface_tolerance_m, checkpoint=checkpoint)
+        vertices_2d = tri.vertices
+    elevations = sample_surface(vertices_2d)
 
     top_vertices = np.column_stack([vertices_2d, elevations]).astype(np.float64)
     bottom_vertices = np.column_stack([vertices_2d, np.full(len(vertices_2d), base_z)]).astype(np.float64)
@@ -41,24 +81,28 @@ def build_land_mesh(
 
     all_vertices = np.concatenate([top_vertices, bottom_vertices], axis=0)
 
-    top_faces = tri.triangles.astype(np.int64)
-    bottom_faces = (tri.triangles[:, ::-1] + n_top).astype(np.int64)
+    top_faces = tri.triangles.astype(np.int64).copy()
+    xy = vertices_2d[top_faces]
+    ab, ac = xy[:, 1] - xy[:, 0], xy[:, 2] - xy[:, 0]
+    clockwise = ab[:, 0] * ac[:, 1] - ab[:, 1] * ac[:, 0] < 0
+    top_faces[clockwise] = top_faces[clockwise, ::-1]
+    bottom_faces = top_faces[:, ::-1] + n_top
 
-    # Walls: for each boundary segment (i -> j) with the polygon interior on the
-    # left, build two outward-facing triangles connecting the top and bottom rims.
-    walls: list[list[int]] = []
-    for i, j in tri.boundary_segments:
-        top_i, top_j = i, j
-        bot_i, bot_j = i + n_top, j + n_top
-        walls.append([top_i, top_j, bot_j])
-        walls.append([top_i, bot_j, bot_i])
-
-    all_faces = np.concatenate(
-        [top_faces, bottom_faces, np.array(walls, dtype=np.int64)], axis=0
-    )
-
+    # Recover directed boundary edges from the CCW top faces. Triangle's segment
+    # list does not promise winding; repairing every face afterwards was costly.
+    edges = np.concatenate([top_faces[:, [0, 1]], top_faces[:, [1, 2]], top_faces[:, [2, 0]]])
+    codes = np.min(edges, axis=1) * n_top + np.max(edges, axis=1)
+    _, first, counts = np.unique(codes, return_index=True, return_counts=True)
+    boundary = edges[first[counts == 1]]
+    i, j = boundary.T
+    walls = np.concatenate([
+        np.column_stack((i, i + n_top, j + n_top)),
+        np.column_stack((i, j + n_top, j)),
+    ])
+    all_faces = np.concatenate([top_faces, bottom_faces, walls])
     mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces, process=True)
-    mesh.fix_normals()
+    if not mesh.is_watertight or not mesh.is_winding_consistent:
+        raise ValueError("Terrain triangulation did not produce a closed, consistently wound solid")
     if mesh.volume < 0:
         mesh.invert()
     return mesh

@@ -14,6 +14,7 @@ from contour.tile_cache import TileCache
 from contour.http_client import HttpClient
 from contour.heightmap import Heightmap
 from contour.settings import Physical
+from contour.production import TERRAIN_SAMPLE_MM, MAX_TERRAIN_ZOOM
 
 EARTH_CIRCUMFERENCE_M = 40_075_017.0
 PROVIDER = "mapbox"
@@ -46,15 +47,17 @@ def fetch_heightmap(
 
 
 def select_zoom(hex_frame: HexFrame, physical: Physical, max_tiles: int = 1024) -> int:
-    """Pick the smallest tile zoom whose pixel resolution meets the requested print
-    resolution, subject to a maximum tile count budget."""
+    """Pick the lowest zoom meeting our fixed production sampling target.
+    Stop at native terrain detail or the tile budget, whichever comes first.
+    The legacy resolutionMm field is accepted but no longer controls quality."""
     centre_lat_rad = math.radians(hex_frame.centre_lat)
-    model_world_diameter_m = 2 * hex_frame.circumradius_m
-    model_pixel_count = physical.size_mm / physical.resolution_mm
+    minx, miny, maxx, maxy = hex_frame.polygon_enu().bounds
+    model_world_diameter_m = max(maxx - minx, maxy - miny)
+    model_pixel_count = physical.size_mm / TERRAIN_SAMPLE_MM
     target_meters_per_pixel = model_world_diameter_m / model_pixel_count
 
     last_within_budget: int | None = None
-    for zoom in range(1, 17):
+    for zoom in range(1, MAX_TERRAIN_ZOOM + 1):
         meters_per_pixel = EARTH_CIRCUMFERENCE_M * math.cos(centre_lat_rad) / (256 * (2**zoom))
         tile_size_m = 256 * meters_per_pixel
         n_tiles_axis = math.ceil(model_world_diameter_m / tile_size_m) + 1

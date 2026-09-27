@@ -1,6 +1,10 @@
 """Tests for the FastAPI app: health, validation, upload + mesh + export flow."""
 from __future__ import annotations
 
+from contour.errors import MeshDetailLimitError
+
+import base64
+import json
 import io
 import zipfile
 
@@ -226,3 +230,56 @@ def test_contour_error_handler_empty_details_defaults_to_empty_dict():
     with TestClient(test_app) as c:
         r = c.get("/boom")
     assert r.json()["details"] == {}
+
+
+@responses.activate
+def test__build_mesh_stream__reports_stages_and_returns_glb(client):
+    upload = client.post("/upload", files={"file": ("track.gpx", SIMPLE_GPX)}).json()
+    _add_mapbox_mocks()
+    response = client.post("/mesh/stream", json={
+        "source": {"id": upload["id"], "sha256": upload["sha256"]},
+        "physical": {"sizeMm": 150, "resolutionMm": 2.0},
+    })
+    assert response.status_code == 200
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert [event["stage"] for event in events if event["type"] == "progress"] == [
+        "frame", "terrain", "water", "land", "details", "preview",
+    ]
+    assert events[-1]["type"] == "result"
+    assert base64.b64decode(events[-1]["glb"]).startswith(b"glTF")
+    assert "land" in events[-1]["metadata"]["parts"]
+    assert len(events[-1]["metadata"]["parts"]) == len(events[-1]["metadata"]["triangles"])
+
+
+def test__build_mesh_stream__validates_before_streaming(client):
+    response = client.post("/mesh/stream", json={"source": {"id": "missing", "sha256": "a" * 64}})
+    assert response.status_code == 404
+
+
+def test__build_mesh_stream__reports_failure_without_exposing_provider_credentials(client, monkeypatch):
+    def fail(*args, **kwargs):
+        kwargs["on_progress"]("terrain")
+        raise RuntimeError("provider url?access_token=private-secret")
+
+    monkeypatch.setattr("contour.mesh_progress.build_kit", fail)
+    upload = client.post("/upload", files={"file": ("track.gpx", SIMPLE_GPX)}).json()
+    response = client.post("/mesh/stream", json={"source": {"id": upload["id"], "sha256": upload["sha256"]}})
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert events[0] == {"type": "progress", "stage": "terrain"}
+    assert events[-1]["type"] == "error"
+    assert "private-secret" not in response.text
+
+
+def test_mesh_stream_explains_detail_limit(client, monkeypatch):
+    upload = client.post("/upload", files={"file": ("track.gpx", SIMPLE_GPX)}).json()
+    def fail(*args, **kwargs):
+        raise MeshDetailLimitError()
+    monkeypatch.setattr("contour.mesh_progress.build_kit", fail)
+    response = client.post("/mesh/stream", json={
+        "source": {"id": upload["id"], "sha256": upload["sha256"]},
+    })
+    event = json.loads(response.text.splitlines()[-1])
+    assert event["type"] == "error"
+    assert event["code"] == "mesh_detail_limit"
+    assert "smaller physical size" in event["message"]
+    assert "try again" not in event["message"].lower()

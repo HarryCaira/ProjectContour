@@ -27,8 +27,15 @@ class Physical(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class ModelColours(BaseModel):
+    terrain: str = Field("#7a8060", pattern=r"^#[0-9a-fA-F]{6}$")
+    water: str = Field("#6a8aa0", pattern=r"^#[0-9a-fA-F]{6}$")
+    route: str = Field("#c44545", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
 class StyleRef(BaseModel):
     name: Literal["monochrome-biome"] = "monochrome-biome"
+    colours: ModelColours = Field(default_factory=ModelColours)
 
 
 class TerrainSettings(BaseModel):
@@ -50,8 +57,8 @@ class Biomes(BaseModel):
 
 class RouteSettings(BaseModel):
     enabled: bool = True
-    width_mm: float = Field(2.0, gt=0, alias="widthMm")
-    height_above_terrain_mm: float = Field(1.0, ge=0, alias="heightAboveTerrainMm")
+    width_mm: float = Field(0.5, gt=0, alias="widthMm")
+    height_above_terrain_mm: float = Field(0.5, ge=0, alias="heightAboveTerrainMm")
 
     model_config = ConfigDict(populate_by_name=True)
 

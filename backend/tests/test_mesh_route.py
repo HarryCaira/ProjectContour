@@ -95,3 +95,14 @@ def test_route_downsampling_caps_segments():
     # Faces per segment: 8 (sides) + walls; plus 2 end caps × 2 triangles = 4.
     # Upper bound on faces: 8 * 100 + 4 = 804.
     assert len(mesh.faces) < 900
+
+
+def test_route_vertex_offsets_survive_processing():
+    mesh = build_route_mesh(_straight_route(), HexFrame(centre_lon=0, centre_lat=0, circumradius_m=200),
+                            _flat_heightmap(10), width_m=4, height_above_terrain_m=3)
+    offsets = mesh.vertex_attributes["_route_offset"]
+    centres = mesh.vertices - offsets
+    assert len(offsets) == len(mesh.vertices)
+    assert np.allclose(centres[:, 2], 10)
+    assert np.allclose(np.linalg.norm(offsets[:, :2], axis=1), 2)
+    assert np.allclose(np.unique(offsets[:, 2]), [0, 3])

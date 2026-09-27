@@ -4,8 +4,9 @@ from __future__ import annotations
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
+from contour.mesh_progress import stream_mesh
 from contour.gltf_export import to_glb
 from contour.stl_export import to_stl_zip
 from contour.gpx import parse_gpx
@@ -72,6 +73,21 @@ def build_mesh(
             "X-Kit-Parts": ",".join(p.name for p in kit.parts),
             "X-Kit-Triangles": ",".join(str(len(p.mesh.faces)) for p in kit.parts),
         },
+    )
+
+
+@router.post("/mesh/stream")
+def build_mesh_stream(
+    settings: Settings,
+    store: GpxStore = Depends(get_gpx_store),
+    deps: PipelineDependencies = Depends(get_pipeline_deps),
+) -> StreamingResponse:
+    _validate_source(store, settings)
+    route = parse_gpx(store.load(settings.source.id))
+    return StreamingResponse(
+        stream_mesh(settings, route, deps),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
 
 

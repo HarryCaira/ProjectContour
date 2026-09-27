@@ -16,5 +16,6 @@ out/
 *.tsbuildinfo
 
 terrain_cache/
+contour_cache/
 *.stl
 *.glb

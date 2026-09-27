@@ -8,6 +8,8 @@ from contour.hex_frame import HexFrame
 from contour.sampling import sample_at_enu
 from contour.heightmap import Heightmap
 from contour.route import Route
+from contour.route_detail import resample_route, simplify_route
+from contour.production import PREVIEW_MAX_EXAGGERATION
 
 
 def build_route_mesh(
@@ -17,6 +19,10 @@ def build_route_mesh(
     width_m: float,
     height_above_terrain_m: float,
     max_segments: int = 500,
+    vertical_exaggeration: float = 1.0,
+    elevation_origin_m: float = 0.0,
+    surface_tolerance_m: float | None = None,
+    sample_spacing_m: float | None = None,
 ) -> trimesh.Trimesh | None:
     """Build a watertight ribbon that follows the route, sampled onto the terrain.
 
@@ -34,7 +40,11 @@ def build_route_mesh(
     pts_2d = enu_pts[:, :2]
 
     # Downsample to keep the mesh tractable.
-    if len(pts_2d) > max_segments:
+    if surface_tolerance_m is not None:
+        if sample_spacing_m is None or sample_spacing_m <= 0 or surface_tolerance_m <= 0:
+            raise ValueError("Route detail requires positive spacing and tolerance")
+        pts_2d = resample_route(pts_2d, sample_spacing_m)
+    elif len(pts_2d) > max_segments:
         idx = np.linspace(0, len(pts_2d) - 1, max_segments + 1).astype(int)
         pts_2d = pts_2d[idx]
 
@@ -43,6 +53,14 @@ def build_route_mesh(
         return None
 
     terrain_z = sample_at_enu(heightmap, pts_2d, local_enu)
+    if surface_tolerance_m is not None:
+        metric = np.column_stack((pts_2d, terrain_z * max(vertical_exaggeration, PREVIEW_MAX_EXAGGERATION)))
+        keep = simplify_route(metric, surface_tolerance_m)
+        pts_2d, terrain_z = pts_2d[keep], terrain_z[keep]
+        n = len(pts_2d)
+        if n < 2:
+            return None
+    terrain_z = elevation_origin_m + (terrain_z - elevation_origin_m) * vertical_exaggeration
 
     # Tangent at each point (central differences in the interior, one-sided at ends).
     tangents = np.zeros_like(pts_2d)
@@ -99,7 +117,11 @@ def build_route_mesh(
     faces.append([last, last + 1, last + 3])
     faces.append([last, last + 3, last + 2])
 
-    mesh = trimesh.Trimesh(vertices=vertices, faces=np.array(faces, dtype=np.int64), process=True)
+    # Per-vertex displacement from the route's terrain centreline. The viewer
+    # can change width/height without rebuilding terrain or downloading a GLB.
+    centres = np.repeat(np.column_stack((pts_2d, terrain_z)), 4, axis=0)
+    mesh = trimesh.Trimesh(vertices=vertices, faces=np.array(faces, dtype=np.int64), process=True,
+                           vertex_attributes={"_route_offset": vertices - centres})
     mesh.fix_normals()
     if mesh.volume < 0:
         mesh.invert()

@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 import io
+import zipfile
+
+import trimesh
 
 import mapbox_vector_tile
 import numpy as np
 import pytest
 import responses
 from PIL import Image
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon, box
 
 from contour.tile_cache import TileCache
 from contour.http_client import HttpClient
+from contour.stl_export import to_stl_zip
 from contour.pipeline import PipelineDependencies, build_kit
 from contour.route import Route
 from contour.settings import Settings
@@ -141,3 +145,73 @@ def test_build_kit_unknown_style_raises(tmp_path):
     object.__setattr__(settings.style, "name", "non-existent-style")
     with pytest.raises(ValueError, match="Unknown style"):
         build_kit(settings, _route(), _deps(tmp_path))
+
+
+@responses.activate
+@pytest.mark.parametrize("size_mm", [50, 150, 300])
+def test__build_kit__physical_units_and_fixed_route_height(tmp_path, size_mm):
+    _add_terrain_mock()
+    _add_biomes_mock()
+    kits = [build_kit(_settings(
+        physical={"sizeMm": size_mm, "resolutionMm": 2},
+        terrain={"verticalExaggeration": factor},
+    ), _route(), _deps(tmp_path)) for factor in [1, 2]]
+    for kit in kits:
+        land = kit.part("land").mesh
+        assert max(land.extents[:2]) == pytest.approx(size_mm)
+        with zipfile.ZipFile(io.BytesIO(to_stl_zip(kit))) as archive:
+            exported_land = trimesh.load(io.BytesIO(archive.read("land.stl")), file_type="stl")
+            exported_route = trimesh.load(io.BytesIO(archive.read("route.stl")), file_type="stl")
+        assert max(exported_land.extents[:2]) == pytest.approx(size_mm, abs=1e-4)
+        assert np.allclose(exported_route.bounds, kit.part("route").mesh.bounds, atol=1e-4)
+        assert kit.part("plinth").mesh.bounds[0, 2] == pytest.approx(0)
+        route = kit.part("route").mesh
+        xy, groups = np.unique(route.vertices[:, :2], axis=0, return_inverse=True)
+        for index in range(len(xy)):
+            zs = route.vertices[groups == index, 2]
+            assert np.ptp(zs) == pytest.approx(0.5)
+    assert np.allclose(kits[0].part("plinth").mesh.bounds, kits[1].part("plinth").mesh.bounds)
+    pivot = kits[0].part("plinth").mesh.bounds[1, 2]
+    top1 = kits[0].part("land").mesh.bounds[1, 2]
+    top2 = kits[1].part("land").mesh.bounds[1, 2]
+    assert top2 - pivot == pytest.approx(2 * (top1 - pivot))
+
+
+@responses.activate
+@pytest.mark.parametrize("size_mm,exaggeration", [(50, 0.5), (150, 1), (300, 5)])
+@pytest.mark.parametrize("shape", ["lake", "edge", "island", "full"])
+def test_water_is_a_surface_insert_with_solid_terrain_below(tmp_path, monkeypatch, size_mm, exaggeration, shape):
+    _add_terrain_mock()
+    area = {}
+
+    def water_polygons(frame, *_):
+        hexagon = frame.polygon_enu()
+        r = frame.circumradius_m
+        if shape == "full":
+            polygon = hexagon
+        elif shape == "edge":
+            polygon = hexagon.intersection(box(0, -2 * r, 2 * r, 2 * r))
+        else:
+            polygon = Point(0, 0).buffer(r / 3)
+            if shape == "island":
+                polygon = polygon.difference(Point(0, 0).buffer(r / 8))
+        area["hex"] = hexagon.area
+        area["scale"] = size_mm / max(np.ptp(np.array(hexagon.exterior.coords), axis=0))
+        return [polygon]
+
+    monkeypatch.setattr("contour.pipeline.fetch_water_polygons", water_polygons)
+    kit = build_kit(_settings(
+        physical={"sizeMm": size_mm, "resolutionMm": 2},
+        terrain={"verticalExaggeration": exaggeration},
+    ), _route(), _deps(tmp_path))
+    land = kit.part("land").mesh
+    water = kit.part("water").mesh
+    assert land.is_watertight and water.is_watertight
+    assert land.is_volume and water.is_volume
+    available_height = water.bounds[1, 2] - land.bounds[0, 2]
+    assert water.extents[2] == pytest.approx(min(0.6, available_height / 2), abs=1e-4)
+    assert water.bounds[0, 2] > land.bounds[0, 2]
+    # On a flat heightmap, together the two materials must completely fill the
+    # hexagonal prism: no through-holes and no overlapping material volumes.
+    expected = area["hex"] * area["scale"] ** 2 * available_height
+    assert land.volume + water.volume == pytest.approx(expected, rel=2e-4)

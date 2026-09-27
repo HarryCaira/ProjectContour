@@ -52,7 +52,28 @@ def triangulate_land(
     regular grid is generated across the hex bbox and points falling inside the
     land polygon are added as Steiner vertices, giving the mesh real terrain detail.
     """
+    if grid_points_per_side < 1:
+        raise ValueError("grid_points_per_side must be positive")
     land = land_polygon(hex_polygon, water_polygons)
+    if isinstance(land, MultiPolygon):
+        pieces = [triangulate_land(poly, [], grid_points_per_side) for poly in land.geoms]
+        vertices, triangles, segments = [], [], []
+        offset = 0
+        for piece in pieces:
+            vertices.append(piece.vertices)
+            triangles.append(piece.triangles + offset)
+            segments.extend((i + offset, j + offset) for i, j in piece.boundary_segments)
+            offset += len(piece.vertices)
+        return LandTriangulation(np.concatenate(vertices), np.concatenate(triangles), segments)
+    minx, miny, maxx, maxy = hex_polygon.bounds
+    spacing = max(maxx - minx, maxy - miny) / grid_points_per_side
+    if water_polygons:
+        # Snap almost-coincident cut vertices before triangulation.
+        land = shapely.set_precision(land, grid_size=spacing * 1e-8)
+        land = orient(land, sign=1.0)
+    # Sample cut edges as densely as the interior. Corner-only elevation
+    # samples interpolate straight across valleys and create raised fins.
+    land = shapely.segmentize(land, max_segment_length=spacing)
     polygons = [land] if land.geom_type == "Polygon" else list(land.geoms)
 
     boundary_vertices: list[tuple[float, float]] = []
@@ -102,7 +123,7 @@ def triangulate_land(
     return LandTriangulation(
         vertices=np.asarray(result["vertices"], dtype=np.float64),
         triangles=np.asarray(result["triangles"], dtype=np.int64),
-        boundary_segments=boundary_segments,
+        boundary_segments=[tuple(map(int, segment)) for segment in result["segments"]],
     )
 
 
