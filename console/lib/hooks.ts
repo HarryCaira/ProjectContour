@@ -1,8 +1,11 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import type { MeshProgress } from "@/lib/mesh-stream";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchMesh, uploadGpx, downloadExport } from "@/lib/api";
 import type { Settings } from "@/lib/settings";
+import { previewSettings } from "@/lib/preview-settings";
 
 /** Upload a GPX file. Caller is responsible for stashing the response into the editor store. */
 export function useUploadGpx() {
@@ -18,13 +21,37 @@ export function useUploadGpx() {
  * yield a new key and trigger a fresh fetch.
  */
 export function useMesh(settings: Settings | null) {
-  return useQuery({
-    queryKey: ["mesh", settings ? stableHash(settings) : null],
-    queryFn: () => fetchMesh(settings as Settings),
-    enabled: !!settings,
+  const preview = settings ? previewSettings(settings) : null;
+  const geometryKey = preview ? JSON.stringify({ ...preview, physical: { ...preview.physical, sizeMm: 0 } }) : null;
+  const [detail, setDetail] = useState<{ geometryKey: string | null; size: number }>({ geometryKey: null, size: 0 });
+  const size = preview ? Math.max(preview.physical.sizeMm, detail.geometryKey === geometryKey ? detail.size : 0) : 0;
+  const desiredKey = preview ? JSON.stringify({ ...preview, physical: { ...preview.physical, sizeMm: size } }) : null;
+  const [key, setKey] = useState<string | null>(null);
+  useEffect(() => {
+    // Geometry edits settle before starting a build. Width/height, colours and
+    // relief do not change this key; shrinking reuses the higher-detail mesh.
+    const timer = setTimeout(() => {
+      setDetail({ geometryKey, size });
+      setKey(desiredKey);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [desiredKey, geometryKey, size]);
+  const [progress, setProgress] = useState<(MeshProgress & { key: string | null }) | null>(null);
+  const query = useQuery({
+    queryKey: ["mesh-interactive-v5", key],
+    queryFn: ({ signal }) => {
+      setProgress({ key, stage: "starting" });
+      return fetchMesh(JSON.parse(key!) as Settings, (update) => {
+        if (!signal.aborted) setProgress({ ...update, key });
+      }, signal);
+    },
+    retry: false,
+    placeholderData: keepPreviousData,
+    enabled: !!settings && !!key,
     staleTime: Infinity,
     gcTime: 1000 * 60 * 30,
   });
+  return { ...query, progress: progress?.key === key ? progress : null };
 }
 
 export function useExport() {
@@ -32,15 +59,6 @@ export function useExport() {
     mutationKey: ["export"],
     mutationFn: (settings: Settings) => downloadExport(settings),
   });
-}
-
-/** Hash that excludes the realtime-only fields. */
-function stableHash(settings: Settings): string {
-  // For v1 we hash the whole settings object — the realtime-only fields
-  // (verticalExaggeration, modelScale) live OUTSIDE Settings, in the
-  // editor store, so settings already only contains topology-affecting
-  // values. Keep it simple.
-  return JSON.stringify(settings);
 }
 
 export { useQueryClient };

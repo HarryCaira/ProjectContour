@@ -36,12 +36,13 @@ def test_manifest_has_expected_shape():
     z = to_stl_zip(_kit(("land", "#abcdef"), ("water", "#112233")))
     with zipfile.ZipFile(io.BytesIO(z)) as zf:
         manifest = json.loads(zf.read("manifest.json"))
+    assert manifest["units"] == "mm"
     assert {p["name"] for p in manifest["parts"]} == {"land", "water"}
     land = next(p for p in manifest["parts"] if p["name"] == "land")
     assert land["material"]["colour"] == "#abcdef"
     assert "vertices" in land["stats"]
     assert "faces" in land["stats"]
-    assert land["stats"]["volume_m3"] > 0
+    assert land["stats"]["volume_mm3"] > 0
 
 
 def test_stl_files_are_loadable_as_meshes():

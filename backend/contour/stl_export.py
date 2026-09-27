@@ -21,6 +21,7 @@ def to_stl_zip(kit: MeshKit) -> bytes:
 
 def _manifest(kit: MeshKit) -> dict:
     return {
+        "units": "mm",
         "parts": [
             {
                 "name": part.name,
@@ -32,7 +33,7 @@ def _manifest(kit: MeshKit) -> dict:
                 "stats": {
                     "vertices": int(len(part.mesh.vertices)),
                     "faces": int(len(part.mesh.faces)),
-                    "volume_m3": float(part.mesh.volume),
+                    "volume_mm3": float(part.mesh.volume),
                 },
             }
             for part in kit.parts

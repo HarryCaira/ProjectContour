@@ -63,16 +63,24 @@ def test_triangulation_area_excludes_water_hole():
 def test_triangulation_has_boundary_segments():
     hex_poly = _hex_polygon()
     tri = triangulate_land(hex_poly, [], grid_points_per_side=20)
-    # A hex has 6 outer edges; with no water there should be exactly 6 boundary segments.
-    assert len(tri.boundary_segments) == 6
+    assert len(tri.boundary_segments) > 6
+    edges = tri.vertices[np.asarray(tri.boundary_segments)]
+    lengths = np.linalg.norm(edges[:, 1] - edges[:, 0], axis=1)
+    bounds = hex_poly.bounds
+    spacing = max(bounds[2] - bounds[0], bounds[3] - bounds[1]) / 20
+    assert lengths.max() <= spacing * (1 + 1e-9)
+    assert lengths.sum() == pytest.approx(hex_poly.length)
 
 
 def test_triangulation_with_water_has_additional_boundary():
     hex_poly = _hex_polygon()
     water = Polygon([(-200, -200), (200, -200), (200, 200), (-200, 200)])
     tri = triangulate_land(hex_poly, [water], grid_points_per_side=20)
-    # 6 hex edges + 4 water edges = 10
-    assert len(tri.boundary_segments) == 10
+    edges = tri.vertices[np.asarray(tri.boundary_segments)]
+    lengths = np.linalg.norm(edges[:, 1] - edges[:, 0], axis=1)
+    assert len(tri.boundary_segments) > 10
+    assert lengths.sum() == pytest.approx(hex_poly.length + water.length)
+    assert lengths.max() <= 100 * (1 + 1e-9)
 
 
 def test_triangulation_grid_adds_interior_points():
@@ -81,3 +89,9 @@ def test_triangulation_grid_adds_interior_points():
     low = triangulate_land(hex_poly, [], grid_points_per_side=5)
     high = triangulate_land(hex_poly, [], grid_points_per_side=50)
     assert len(high.vertices) > len(low.vertices)
+
+
+@pytest.mark.parametrize("density", [0, -1])
+def test__triangulate_land__rejects_invalid_density(density: int) -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        triangulate_land(_hex_polygon(), [], grid_points_per_side=density)

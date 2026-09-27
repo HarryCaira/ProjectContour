@@ -16,6 +16,17 @@ class ContourError(Exception):
         self.details = details or {}
 
 
+class MeshDetailLimitError(ContourError, ValueError):
+    """A safe, actionable quality-budget failure for previews and exports."""
+
+    def __init__(self):
+        super().__init__(
+            code="mesh_detail_limit",
+            message="This landscape exceeds the current mesh budget. Try a smaller physical size.",
+            status_code=422,
+        )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ContourError)
     async def _handle_contour_error(request: Request, exc: ContourError) -> JSONResponse:

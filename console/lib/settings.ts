@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Mirrors backend/contour/schema/settings.py — every field, every default,
+// Mirrors backend/contour/settings.py — every field, every default,
 // every validator. The wire format uses camelCase; both the backend and the
 // frontend speak it natively.
 
@@ -21,8 +21,18 @@ export const PhysicalSchema = z.object({
   resolutionMm: z.number().positive().default(0.2),
 });
 
+export const DEFAULT_COLOURS = { terrain: "#7a8060", water: "#6a8aa0", route: "#c44545" };
+const hexColour = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+export const ColoursSchema = z.object({
+  terrain: hexColour.default(DEFAULT_COLOURS.terrain),
+  water: hexColour.default(DEFAULT_COLOURS.water),
+  route: hexColour.default(DEFAULT_COLOURS.route),
+});
+export type ModelColours = z.infer<typeof ColoursSchema>;
+
 export const StyleRefSchema = z.object({
   name: z.literal("monochrome-biome").default("monochrome-biome"),
+  colours: ColoursSchema.default({}),
 });
 
 export const TerrainSettingsSchema = z.object({
@@ -40,8 +50,8 @@ export const BiomesSchema = z.object({
 
 export const RouteSettingsSchema = z.object({
   enabled: z.boolean().default(true),
-  widthMm: z.number().positive().default(2),
-  heightAboveTerrainMm: z.number().min(0).default(1),
+  widthMm: z.number().positive().default(0.5),
+  heightAboveTerrainMm: z.number().min(0).default(0.5),
 });
 
 export const PlinthSchema = z.object({
