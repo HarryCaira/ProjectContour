@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import trimesh
 
-from contour.schema.settings import Settings
-from contour.styles.base import NeutralScene
-from contour.styles.monochrome_biome import MonochromeBiome
+from contour.settings import Settings
+from contour.style import NeutralScene
+from contour.monochrome_biome import MonochromeBiome
 
 
 def _settings() -> Settings:

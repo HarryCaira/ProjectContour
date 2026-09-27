@@ -6,7 +6,7 @@ Operational technical design for v1, described by `PRD.md`. Captures the decisio
 
 Three components:
 
-- **Frontend** — Next.js + React + React Three Fiber + Tailwind, served from `/frontend`. Owns the editor UI, the 3D viewer, real-time transforms, and export.
+- **Frontend** — Next.js + React + React Three Fiber + Tailwind, served from `/console`. Owns the editor UI, the 3D viewer, real-time transforms, and export.
 - **Backend** — FastAPI on top of a Python meshing pipeline, served from `/backend`. Owns upload handling, data fetching, mesh generation, and asset serving.
 - **Mapbox** — DEM (Terrain-RGB tiles) and biome polygons (vector tiles, `mapbox-streets-v8`).
 
@@ -39,22 +39,22 @@ Browser ── HTTP ──> FastAPI ── HTTP ──> Mapbox
 
 Stages, each with typed input/output. Each stage lives in its own module under `backend/contour/`.
 
-### 3.1 Input — `contour/input/`
+### 3.1 Input — `contour/gpx.py`
 GPX → normalised `Route` (lat/lon/elevation arrays + metadata). Handles multi-track files (first non-empty track), missing elevation (fall back to DEM lookup), and validates non-empty.
 
-### 3.2 Framing — `contour/framing/`
+### 3.2 Framing — `contour/hex_frame.py`
 `Route` + `Settings.framing` → `HexFrame` (centre lat/lon, circumradius in metres, orientation). The hex is the smallest regular **pointy-top** hexagon containing the route bbox expanded by `paddingRatio`, oriented by `rotationDegrees` around its centre.
 
-### 3.3 Coordinate frame — `contour/geo/`
+### 3.3 Coordinate frame — `contour/coordinates.py` and `contour/tiles.py`
 A `LocalENU` transform anchored on the hex centre is established once per request and reused by every stage that needs to convert lat/lon to local coordinates. Routes, heightmap pixel positions, and biome polygons all share this frame.
 
-### 3.4 Terrain data — `contour/data/terrain.py`
+### 3.4 Terrain data — `contour/terrain_data.py`
 `HexFrame` + `Settings.physical.resolutionMm` + `Settings.physical.sizeMm` → `Heightmap` (numpy array of elevations in metres + tile/ENU metadata). Picks the smallest tile zoom whose pixel resolution meets the requested print resolution (subject to a tile budget). Fetches Mapbox Terrain-RGB tiles, decodes, stitches.
 
-### 3.5 Biome data — `contour/data/biomes.py`
+### 3.5 Biome data — `contour/biome_data.py`
 `HexFrame` → `BiomePolygons` (currently `{water: [shapely.Polygon, ...]}`) in ENU coordinates. Fetches vector tiles from `mapbox-streets-v8`, extracts the `water` layer, reprojects, unions across tile boundaries, and clips to the hex.
 
-### 3.6 Meshing — `contour/mesh/`
+### 3.6 Meshing — `contour/*_mesh.py`
 
 Produces an unstyled **neutral scene**:
 
@@ -65,9 +65,9 @@ Produces an unstyled **neutral scene**:
 
 All meshes share the same ENU coordinate frame and assemble correctly.
 
-### 3.7 Style — `contour/styles/`
+### 3.7 Style — `contour/style.py` and `contour/monochrome_biome.py`
 
-`base.py` defines a `Style` interface. v1 has one implementation:
+`style.py` defines a `Style` interface. v1 has one implementation:
 
 - `monochrome_biome.py` takes the neutral scene and returns a `MeshKit`:
 
@@ -86,10 +86,10 @@ For monochrome biome, materials are a small palette of muted earth tones plus a 
 
 This is the seam where future styles (topographic stack, realistic) will plug in — they receive the same neutral scene and produce a different `MeshKit`, possibly with different geometry decisions.
 
-### 3.8 Export — `contour/export/`
+### 3.8 Export — `contour/gltf_export.py` and `contour/stl_export.py`
 
-- `gltf.py`: serialise a `MeshKit` to `.glb` for the frontend.
-- `stl.py`: serialise a `MeshKit` as a zip of per-part `.stl` files at user export time.
+- `gltf_export.py`: serialise a `MeshKit` to `.glb` for the frontend.
+- `stl_export.py`: serialise a `MeshKit` as a zip of per-part `.stl` files at user export time.
 
 ## 4. Settings Schema
 
@@ -186,58 +186,45 @@ A `(schemaVersion, Settings, gpx_sha256, mapboxDataVersion)` tuple uniquely dete
 
 ## 12. Module Structure
 
-```
+```text
 backend/
-  contour/
-    schema/          # Pydantic models
-      settings.py
-      kit.py
-    http/            # cached, retried HTTP client
-      client.py
-      cache.py
-    geo/             # coordinate math
-      transforms.py
-      tiles.py
-    input/
-      gpx.py
-    framing/
-      hex.py
-    data/
-      terrain.py
-      biomes.py
-    mesh/
-      terrain.py
-      water.py
-      route.py
-      plinth.py
-      hex_clip.py
-    styles/
-      base.py
-      monochrome_biome.py
-    export/
-      gltf.py
-      stl.py
-    pipeline.py
-    api/
-      server.py
-      routes.py
-      errors.py
-  pyproject.toml
+  contour/           # Flat Python package
+    server.py        # FastAPI application and startup
+    api.py           # Upload, mesh, export, and health endpoints
+    errors.py        # API error handling
+    settings.py      # Versioned model settings
+    route.py         # Route data model
+    heightmap.py     # Heightmap data model
+    kit.py           # Labelled mesh kit data model
+    gpx.py           # GPX parsing
+    gpx_store.py     # Uploaded GPX persistence
+    hex_frame.py     # Hexagonal framing
+    coordinates.py   # Geographic coordinate transforms
+    tiles.py         # Map tile maths
+    http_client.py   # Retried HTTP requests
+    tile_cache.py    # Disk tile cache
+    terrain_data.py  # Mapbox elevation acquisition
+    biome_data.py    # Mapbox water acquisition
+    terrain_mesh.py  # Land geometry
+    water_mesh.py    # Water geometry
+    route_mesh.py    # Route ribbon geometry
+    plinth_mesh.py   # Plinth geometry
+    sampling.py      # Terrain sampling
+    hex_clip.py      # Clipping and triangulation
+    style.py         # Neutral scene and style interface
+    monochrome_biome.py
+    gltf_export.py   # Browser preview export
+    stl_export.py    # Printable kit export
+    pipeline.py      # Generation orchestration
   tests/
+  pyproject.toml
+  uv.lock
 
-frontend/
-  app/                      # Next.js routes
-  components/
-    editor/                 # sliders, controls
-    viewer/                 # R3F scene
-  lib/
-    schema/                 # Zod settings schema
-    api/                    # TanStack Query bindings
-    state/                  # Zustand stores
-    transforms/             # client-side mesh transforms
+console/
+  app/               # Next.js page, layout, providers, and CSS
+  components/        # EditorPanel, UploadButton, Slider, Scene, KitMesh
+  lib/               # api.ts, hooks.ts, settings.ts, editor-store.ts
   package.json
-
-reference/                  # existing Python prototype, kept temporarily for context
 ```
 
 ## 13. Things Deliberately Not Built (v1)

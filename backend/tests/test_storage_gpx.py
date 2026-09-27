@@ -5,7 +5,7 @@ import hashlib
 
 import pytest
 
-from contour.storage.gpx import GpxStore
+from contour.gpx_store import GpxStore
 
 
 def test_save_returns_id_and_hash(tmp_path):

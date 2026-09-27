@@ -4,8 +4,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from contour.geo.tiles import RasterTile
-from contour.schema.heightmap import Heightmap
+from contour.tiles import RasterTile
+from contour.heightmap import Heightmap
 
 
 def _zeros(h: int, w: int) -> np.ndarray:

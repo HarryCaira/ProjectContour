@@ -10,16 +10,16 @@ from shapely.geometry import Polygon
 
 import responses
 
-from contour.data.biomes import (
+from contour.biome_data import (
     _convert_to_lonlat,
     extract_water_polygons_enu,
     fetch_water_polygons,
 )
-from contour.framing.hex import HexFrame
-from contour.geo.tiles import RasterTile
-from contour.geo.transforms import LocalENU
-from contour.http.cache import TileCache
-from contour.http.client import HttpClient
+from contour.hex_frame import HexFrame
+from contour.tiles import RasterTile
+from contour.coordinates import LocalENU
+from contour.tile_cache import TileCache
+from contour.http_client import HttpClient
 
 
 def _encode_water_tile(polygons_in_extent: list[Polygon], extent: int = 4096) -> bytes:

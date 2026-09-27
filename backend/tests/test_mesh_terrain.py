@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 from shapely.geometry import Polygon
 
-from contour.framing.hex import HexFrame
-from contour.mesh.terrain import build_land_mesh
-from contour.schema.heightmap import Heightmap
+from contour.hex_frame import HexFrame
+from contour.terrain_mesh import build_land_mesh
+from contour.heightmap import Heightmap
 
 
 def _tile_at(lon: float, lat: float, zoom: int) -> tuple[int, int]:

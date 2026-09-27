@@ -7,8 +7,8 @@ import zipfile
 
 import trimesh
 
-from contour.export.stl import to_stl_zip
-from contour.schema.kit import KitPart, Material, MeshKit
+from contour.stl_export import to_stl_zip
+from contour.kit import KitPart, Material, MeshKit
 
 
 def _kit(*part_specs: tuple[str, str]) -> MeshKit:

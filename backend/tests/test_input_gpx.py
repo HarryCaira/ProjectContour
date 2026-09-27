@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from contour.input.gpx import parse_gpx
+from contour.gpx import parse_gpx
 
 SIMPLE_GPX = b"""<?xml version="1.0"?>
 <gpx version="1.1" creator="test">

@@ -32,7 +32,7 @@ dev = [
 ]
 
 [project.scripts]
-contour-serve = "contour.api.server:run"
+contour-serve = "contour.server:run"
 
 [build-system]
 requires = ["hatchling"]

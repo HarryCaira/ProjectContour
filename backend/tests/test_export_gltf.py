@@ -6,8 +6,8 @@ import io
 import pytest
 import trimesh
 
-from contour.export.gltf import _hex_to_rgba, to_glb
-from contour.schema.kit import KitPart, Material, MeshKit
+from contour.gltf_export import _hex_to_rgba, to_glb
+from contour.kit import KitPart, Material, MeshKit
 
 
 def _kit(*part_specs: tuple[str, str]) -> MeshKit:

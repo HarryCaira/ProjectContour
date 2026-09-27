@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from contour.geo.transforms import LocalENU
+from contour.coordinates import LocalENU
 
 
 def test_origin_maps_to_zero():

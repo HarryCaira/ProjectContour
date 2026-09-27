@@ -3,20 +3,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from contour.data.biomes import fetch_water_polygons
-from contour.data.terrain import fetch_heightmap
-from contour.framing.hex import hex_frame_for_route
-from contour.http.cache import TileCache
-from contour.http.client import HttpClient
-from contour.mesh.plinth import build_plinth_mesh
-from contour.mesh.route import build_route_mesh
-from contour.mesh.terrain import build_land_mesh
-from contour.mesh.water import build_water_mesh
-from contour.schema.kit import MeshKit
-from contour.schema.route import Route
-from contour.schema.settings import Settings
-from contour.styles.base import NeutralScene, Style
-from contour.styles.monochrome_biome import MonochromeBiome
+from contour.biome_data import fetch_water_polygons
+from contour.terrain_data import fetch_heightmap
+from contour.hex_frame import hex_frame_for_route
+from contour.tile_cache import TileCache
+from contour.http_client import HttpClient
+from contour.plinth_mesh import build_plinth_mesh
+from contour.route_mesh import build_route_mesh
+from contour.terrain_mesh import build_land_mesh
+from contour.water_mesh import build_water_mesh
+from contour.kit import MeshKit
+from contour.route import Route
+from contour.settings import Settings
+from contour.style import NeutralScene, Style
+from contour.monochrome_biome import MonochromeBiome
 
 
 @dataclass
