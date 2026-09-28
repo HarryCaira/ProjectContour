@@ -49,7 +49,7 @@ async def stream_mesh(settings: Settings, route: Route, deps: PipelineDependenci
         except InterruptedError:
             return
         except ContourError as error:
-            send({"type": "error", "code": error.code, "message": error.message})
+            send({"type": "error", "code": error.code, "message": error.message, "details": error.details})
         except Exception as error:
             logging.getLogger(__name__).error("Model build failed: %s", type(error).__name__)
             # Provider exceptions can contain credential-bearing URLs.

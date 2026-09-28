@@ -260,3 +260,16 @@ def test_fetch_water_polygons_returns_empty_when_no_water(tmp_path):
     polygons = fetch_water_polygons(frame, client, cache, mapbox_token="test-token", zoom=14)
 
     assert polygons == []
+
+
+def test_point_water_contacts_get_finite_connection():
+    from shapely.geometry import box
+    from contour.biome_data import _join_water_contacts
+    first, second = box(0, 0, 10, 10), box(10, 10, 20, 20)
+    joined = _join_water_contacts([first, second])
+    assert joined.geom_type == 'Polygon'
+    assert joined.is_valid
+    assert joined.boundary.hausdorff_distance(first.union(second).boundary) < .02
+    # Independent lakes must not be joined or reshaped.
+    separate = box(30, 30, 40, 40)
+    assert _join_water_contacts([first, separate]).equals(first.union(separate))

@@ -196,6 +196,9 @@ settings.route.heightAboveTerrainMm = 3;
 settings.terrain.verticalExaggeration = 4;
 settings.style.colours.terrain = '#123456';
 assert.equal(JSON.stringify(previewSettings(settings)), originalKey);
+settings.terrain.maximumSourceDetail = true;
+assert.notEqual(JSON.stringify(previewSettings(settings)), originalKey);
+assert.equal(previewSettings(settings).terrain.maximumSourceDetail, true);
 const scene = new Group();
 const land = new Mesh(new BoxGeometry(100,80,10));
 land.name='land'; land.position.z=5;
@@ -223,3 +226,41 @@ assert.deepEqual(Array.from(land.geometry.attributes.position.array),unchanged);
 """
     subprocess.run(["node", "--experimental-strip-types", "--input-type=module", "-e", script],
                    cwd=console_dir, check=True, capture_output=True, text=True)
+
+
+def test__prepare_terrain_shading__smooths_surface_and_preserves_hard_edges(console_dir: Path) -> None:
+    script = """
+import assert from 'node:assert/strict';
+import { BoxGeometry, Group, Mesh, MeshStandardMaterial, BufferGeometry, Float32BufferAttribute } from 'three';
+import { prepareTerrainShading } from './lib/kit-scene.ts';
+const scene = new Group();
+const geometry = new BufferGeometry();
+geometry.setAttribute('position', new Float32BufferAttribute([
+  0,0,0, 1,0,0, 0,1,0,
+  1,0,0, 1,1,0.2, 0,1,0,
+], 3));
+const land = new Mesh(geometry, new MeshStandardMaterial({flatShading:true}));
+land.name = 'land';
+scene.add(land);
+const plinth = new Mesh(new BoxGeometry(), new MeshStandardMaterial({flatShading:true}));
+plinth.name = 'plinth';
+scene.add(plinth);
+const before = Array.from(geometry.attributes.position.array);
+prepareTerrainShading(scene);
+assert.equal(land.material.flatShading, false);
+assert.deepEqual(Array.from(land.geometry.attributes.position.array), before);
+const normals = land.geometry.attributes.normal;
+assert.ok(normals.getX(1) < 0); // tilted neighbour contributes to the shared vertex
+assert.equal(normals.getX(1), normals.getX(3));
+assert.equal(plinth.material.flatShading, true);
+const box = new Mesh(new BoxGeometry(), new MeshStandardMaterial({flatShading:true}));
+box.name = 'land';
+const boxScene = new Group(); boxScene.add(box);
+prepareTerrainShading(boxScene);
+const boxNormals = box.geometry.attributes.normal;
+for (let i=0; i<boxNormals.count; i++) {
+  const n = [boxNormals.getX(i), boxNormals.getY(i), boxNormals.getZ(i)];
+  assert.equal(n.filter(v => Math.abs(v) > 0.01).length, 1);
+}
+"""
+    subprocess.run(["node", "--experimental-strip-types", "--input-type=module", "-e", script], cwd=console_dir, check=True, capture_output=True, text=True)

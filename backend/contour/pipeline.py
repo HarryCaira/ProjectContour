@@ -20,10 +20,12 @@ from contour.terrain_cache import cached_terrain
 from contour.water_mesh import build_water_mesh, shoreline_water_levels
 from contour.kit import MeshKit
 from contour.route import Route
-from contour.settings import Settings
+from contour.settings import Settings, DetailSettings
 from contour.style import NeutralScene, Style
 from contour.monochrome_biome import MonochromeBiome
-from contour.production import TERRAIN_SAMPLE_MM, SURFACE_TOLERANCE_MM, PREVIEW_MAX_EXAGGERATION
+from contour.sampling import sample_at_enu
+from contour.surface_processing import smooth_heightmap, shoreline_sampler
+from contour.production import PREVIEW_MAX_EXAGGERATION
 
 
 WATER_THICKNESS_MM = 0.6
@@ -51,25 +53,33 @@ def build_kit(
     Stages: framing -> terrain fetch -> biomes fetch -> Z planning ->
     neutral meshes -> style application.
     """
+    source_detail = settings.terrain.maximum_source_detail
+    detail = settings.terrain.detail or DetailSettings(force_source_zoom=source_detail, smoothing_max_mm=0 if source_detail else 0.05)
     report = on_progress or (lambda stage: None)
     report("frame")
     hex_frame = hex_frame_for_route(
         route,
         padding_ratio=settings.framing.padding_ratio,
-        rotation_degrees=settings.framing.rotation_degrees,
     )
 
     report("terrain")
     heightmap = fetch_heightmap(
-        hex_frame, settings.physical, deps.http_client, deps.tile_cache, deps.mapbox_token
+        hex_frame, settings.physical, deps.http_client, deps.tile_cache, deps.mapbox_token,
+        maximum_source_detail=detail.force_source_zoom, sample_mm=detail.sample_mm,
+        max_zoom=detail.max_zoom, max_tiles=detail.max_tiles,
     )
 
     report("water")
     water_polygons = []
     if settings.biomes.water.enabled:
         water_polygons = fetch_water_polygons(
-            hex_frame, deps.http_client, deps.tile_cache, deps.mapbox_token
+            hex_frame, deps.http_client, deps.tile_cache, deps.mapbox_token, zoom=detail.water_zoom
         )
+
+    bounds = hex_frame.polygon_enu().bounds
+    mm_per_m = settings.physical.size_mm / max(bounds[2] - bounds[0], bounds[3] - bounds[1])
+    if detail.smoothing_sigma > 0 and detail.smoothing_max_mm > 0:
+        heightmap = smooth_heightmap(heightmap, mm_per_m, sigma=detail.smoothing_sigma, max_mm=detail.smoothing_max_mm)
 
     # Z planning — everything is in metres at this point.
     elev_min = float(heightmap.elevations.min())
@@ -79,8 +89,6 @@ def build_kit(
     base_thickness_m = max(0.05 * elev_range, 0.005 * model_world_diameter_m)
     land_base_z = elev_min - base_thickness_m
     plinth_height_m = 0.05 * model_world_diameter_m
-    minx, miny, maxx, maxy = hex_frame.polygon_enu().bounds
-    mm_per_m = settings.physical.size_mm / max(maxx - minx, maxy - miny)
     exaggeration = settings.terrain.vertical_exaggeration
     water_levels = shoreline_water_levels(
         water_polygons, heightmap, hex_frame, bottom_z=land_base_z, recess_m=0,
@@ -95,9 +103,19 @@ def build_kit(
 
     native_spacing_m = EARTH_CIRCUMFERENCE_M * math.cos(math.radians(hex_frame.centre_lat)) / (heightmap.tile_size * 2**heightmap.zoom)
 
+    source_detail = settings.terrain.maximum_source_detail
+    surface_tolerance = (None if source_detail else
+                         detail.tolerance_mm / (mm_per_m * max(exaggeration, PREVIEW_MAX_EXAGGERATION)))
+    sample_spacing = native_spacing_m / 2 if source_detail else max(detail.sample_mm / mm_per_m, native_spacing_m / 2)
+
+    surface = shoreline_sampler(
+        lambda points: sample_at_enu(heightmap, points, hex_frame.local_enu()),
+        water_polygons, water_levels, minimum_width=detail.shoreline_pixels * native_spacing_m,
+    )
+
     report("land")
     # Route width/height, colours, and plinth settings never alter this surface.
-    # A mesh validated at a larger print size is also sufficient for a smaller one.
+    # Smoothing is tied to physical size, which is part of the cache identity.
     land = cached_terrain(
         deps.tile_cache.root / "_derived" / "terrain_meshes",
         identity={
@@ -106,17 +124,23 @@ def build_kit(
             "water": settings.biomes.water.enabled,
             "zoom": heightmap.zoom,
             "exaggeration": max(exaggeration, PREVIEW_MAX_EXAGGERATION),
-            "tolerance": SURFACE_TOLERANCE_MM,
-            "sampling": TERRAIN_SAMPLE_MM,
+            "tolerance": surface_tolerance,
+            "maximum_source_detail": source_detail,
+            "sampling": detail.sample_mm,
+            "detail": detail.model_dump(),
+            "surface_size_mm": settings.physical.size_mm,
         },
         quality_size_mm=settings.physical.size_mm,
         checkpoint=lambda: report("land"),
         build=lambda: build_land_mesh(
             hex_frame, heightmap, water_polygons, base_z=land_base_z, water_levels=water_levels,
-            grid_points_per_side=24,
-            surface_tolerance_m=SURFACE_TOLERANCE_MM / (mm_per_m * max(exaggeration, PREVIEW_MAX_EXAGGERATION)),
-            sample_spacing_m=max(TERRAIN_SAMPLE_MM / mm_per_m, native_spacing_m / 2),
+            grid_points_per_side=math.ceil(model_world_diameter_m / native_spacing_m) if source_detail else 24,
+            native_source_grid=source_detail,
+            max_vertices=detail.max_vertices, max_reference_points=detail.max_reference_points, max_passes=detail.max_passes,
+            surface_tolerance_m=surface_tolerance,
+            sample_spacing_m=sample_spacing,
             checkpoint=lambda: report("land"),
+            surface_sampler=surface,
         ),
     )
 
@@ -137,8 +161,10 @@ def build_kit(
         route_mesh = build_route_mesh(
             route, hex_frame, heightmap, width_m=width_m, height_above_terrain_m=height_m,
             vertical_exaggeration=exaggeration, elevation_origin_m=land_base_z,
-            surface_tolerance_m=SURFACE_TOLERANCE_MM / mm_per_m,
-            sample_spacing_m=max(TERRAIN_SAMPLE_MM / mm_per_m, native_spacing_m / 2),
+            surface_tolerance_m=detail.source_route_tolerance_m if source_detail else detail.route_tolerance_mm / mm_per_m,
+            max_points=detail.max_route_points,
+            sample_spacing_m=sample_spacing,
+            surface_sampler=surface,
         )
 
     plinth = None

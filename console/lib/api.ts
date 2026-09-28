@@ -17,6 +17,7 @@ export interface KitMetadata {
 export interface MeshResult {
   glb: ArrayBuffer;
   physicalSizeMm?: number;
+  maximumSourceDetail?: boolean;
   metadata: KitMetadata;
 }
 
@@ -41,7 +42,7 @@ export async function fetchMesh(
   });
   if (!r.ok) throw await asError(r);
   if (!r.body) throw new Error("Your browser couldn't receive the model. Please try again.");
-  return { ...await readMeshStream(r.body, onProgress), physicalSizeMm: settings.physical.sizeMm };
+  return { ...await readMeshStream(r.body, onProgress), physicalSizeMm: settings.physical.sizeMm, maximumSourceDetail: settings.terrain.maximumSourceDetail };
 }
 
 export async function downloadExport(settings: Settings): Promise<Blob> {
@@ -63,4 +64,21 @@ async function asError(r: Response): Promise<Error> {
     body = await r.text();
   }
   return new Error(`${r.status}: ${body}`);
+}
+
+
+export interface LandCover {
+  image: string;
+  bounds: [number, number, number, number];
+  percentages: { wood: number; rock: number };
+  zoom: number;
+}
+
+export async function fetchLandCover(settings: Settings, signal?: AbortSignal): Promise<LandCover> {
+  const response = await fetch(`${BASE}/landcover`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify(settings), signal,
+  });
+  if (!response.ok) throw await asError(response);
+  return response.json();
 }

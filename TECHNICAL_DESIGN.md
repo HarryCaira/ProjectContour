@@ -33,17 +33,17 @@ Browser ── HTTP ──> FastAPI ── HTTP ──> Mapbox
 ### Edits
 
 - **Pure transforms (scale, vertical exaggeration)**: applied entirely in the frontend on the existing meshes. No server roundtrip. Real-time.
-- **Topology-changing edits (resolution, frame, rotation, future biome toggles)**: client POSTs updated `Settings` to `/mesh`, backend regenerates, frontend swaps the kit. The kit cache (keyed on `(gpx_sha256, settings_hash)`) makes repeated edits over a settings space near-instant.
+- **Topology-changing edits (resolution, frame, future biome toggles)**: client POSTs updated `Settings` to `/mesh`, backend regenerates, frontend swaps the kit. The kit cache (keyed on `(gpx_sha256, settings_hash)`) makes repeated edits over a settings space near-instant.
 
 ## 3. The Pipeline
 
 Stages, each with typed input/output. Each stage lives in its own module under `backend/contour/`.
 
 ### 3.1 Input — `contour/gpx.py`
-GPX → normalised `Route` (lat/lon/elevation arrays + metadata). Handles multi-track files (first non-empty track), missing elevation (fall back to DEM lookup), and validates non-empty.
+GPX → normalised `Route` (lat/lon/elevation arrays + metadata). Preserves every non-empty track segment with explicit recording breaks; falls back to route elements when tracks are absent. Missing elevations are filled within each segment, and terrain-following geometry uses DEM elevations. Framing includes all points, while distance and route ribbons exclude recording gaps.
 
 ### 3.2 Framing — `contour/hex_frame.py`
-`Route` + `Settings.framing` → `HexFrame` (centre lat/lon, circumradius in metres, orientation). The hex is the smallest regular **pointy-top** hexagon containing the route bbox expanded by `paddingRatio`, oriented by `rotationDegrees` around its centre.
+`Route` + `Settings.framing` → `HexFrame` (centre lat/lon, circumradius in metres). The hex is the smallest regular **pointy-top** hexagon containing the route bbox expanded by `paddingRatio`.
 
 ### 3.3 Coordinate frame — `contour/coordinates.py` and `contour/tiles.py`
 A `LocalENU` transform anchored on the hex centre is established once per request and reused by every stage that needs to convert lat/lon to local coordinates. Routes, heightmap pixel positions, and biome polygons all share this frame.
@@ -99,7 +99,7 @@ The source of truth for a model. Validated on both ends — Pydantic in Python, 
 {
   schemaVersion: 1,
   source: { type: "gpx", id: string, sha256: string },
-  framing: { shape: "hex", paddingRatio: number, rotationDegrees: number },
+  framing: { shape: "hex", paddingRatio: number },
   physical: { sizeMm: number, resolutionMm: number },
   style: { name: "monochrome-biome" },
   terrain: { verticalExaggeration: number },
@@ -167,7 +167,6 @@ Both are bound to Zustand state; sliders update the store; R3F's reactivity prop
 
 - **Shape**: pointy-top regular hexagon (flat-bottom horizontal edges).
 - **Sizing**: smallest hexagon centred on the route's centroid whose bounding circle contains the route bbox expanded by `paddingRatio`.
-- **Rotation**: `rotationDegrees ∈ [0°, 60°)` rotates the hex around its centre.
 - **Clipping**: every 2D polygon (land, water) is clipped against the hex; meshes are built within the clipped region with vertical walls along the hex boundary.
 
 ## 10. Water Rendering
@@ -245,3 +244,13 @@ console/
 - **Coastal routes.** Ocean polygons are conceptually enormous; clipping them to the hex must be robust. Plan: rely on shapely's clipping, validate on a coastal test route.
 - **Mapbox vector tile licensing.** Confirm before launch that our usage falls within the developer plan; consider Protomaps for the Commerce phase if not.
 - **High-resolution viewer performance.** Hundreds of thousands of triangles in the browser is fine on desktop but may need decimation for the preview on weaker machines.
+
+
+### Adaptive terrain validation performance
+
+Reference elevations and their spatial index are built once per terrain build.
+Refinement reuses sampled errors only for exactly unchanged, oriented triangles
+with unchanged vertex coordinates; changed triangles receive all seven probes
+and all covered reference points. A complete final validation checks every
+triangle before accepting an incrementally validated mesh. Tolerances, sampling
+density, mesh budgets and the source surface are unchanged by this optimisation.

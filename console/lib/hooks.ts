@@ -38,12 +38,14 @@ export function useMesh(settings: Settings | null) {
   }, [desiredKey, geometryKey, size]);
   const [progress, setProgress] = useState<(MeshProgress & { key: string | null }) | null>(null);
   const query = useQuery({
-    queryKey: ["mesh-interactive-v5", key],
-    queryFn: ({ signal }) => {
+    queryKey: ["mesh-interactive-v9", key],
+    queryFn: async ({ signal }) => {
+      const requested = JSON.parse(key!) as Settings;
       setProgress({ key, stage: "starting" });
-      return fetchMesh(JSON.parse(key!) as Settings, (update) => {
+      const mesh = await fetchMesh(requested, (update) => {
         if (!signal.aborted) setProgress({ ...update, key });
       }, signal);
+      return { ...mesh, coverageKey: JSON.stringify([requested.source, requested.framing]) };
     },
     retry: false,
     placeholderData: keepPreviousData,
@@ -51,7 +53,7 @@ export function useMesh(settings: Settings | null) {
     staleTime: Infinity,
     gcTime: 1000 * 60 * 30,
   });
-  return { ...query, progress: progress?.key === key ? progress : null };
+  return { ...query, matchesCoverage: query.data?.coverageKey === JSON.stringify([settings?.source, settings?.framing]), progress: progress?.key === key ? progress : null };
 }
 
 export function useExport() {

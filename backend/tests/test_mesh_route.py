@@ -106,3 +106,29 @@ def test_route_vertex_offsets_survive_processing():
     assert np.allclose(centres[:, 2], 10)
     assert np.allclose(np.linalg.norm(offsets[:, :2], axis=1), 2)
     assert np.allclose(np.unique(offsets[:, 2]), [0, 3])
+
+
+def test__build_route_mesh__uses_adjusted_surface_for_route_base() -> None:
+    mesh = build_route_mesh(_straight_route(), HexFrame(0, 0, 200), _flat_heightmap(10),
+                            width_m=5, height_above_terrain_m=2,
+                            surface_sampler=lambda points: np.full(len(points), 30.0))
+    assert mesh.bounds[:, 2] == pytest.approx([30, 32])
+    assert mesh.is_watertight
+
+
+def test_multiple_segments_have_separate_caps_and_keep_resize_attributes():
+    route = Route(np.zeros(4), np.array([-.001, -.0005, .0005, .001]), np.zeros(4), segment_starts=(0, 2))
+    mesh = build_route_mesh(route, HexFrame(centre_lon=0, centre_lat=0, circumradius_m=200),
+                            _flat_heightmap(), width_m=2, height_above_terrain_m=1,
+                            surface_tolerance_m=.01, sample_spacing_m=10)
+    assert mesh.is_watertight
+    assert len(mesh.split()) == 2
+    assert mesh.vertex_attributes['_route_offset'].shape == mesh.vertices.shape
+    # No face crosses the unrecorded gap around the origin.
+    assert not np.any((mesh.triangles[:, :, 0].min(axis=1) < 0) & (mesh.triangles[:, :, 0].max(axis=1) > 0))
+    centres = mesh.vertices - mesh.vertex_attributes['_route_offset']
+    assert np.allclose(centres[:, 1:], 0, atol=1e-6)
+    with pytest.raises(ValueError, match='budget'):
+        build_route_mesh(route, HexFrame(centre_lon=0, centre_lat=0, circumradius_m=200),
+                         _flat_heightmap(), width_m=2, height_above_terrain_m=1,
+                         surface_tolerance_m=.01, sample_spacing_m=10, max_points=10)

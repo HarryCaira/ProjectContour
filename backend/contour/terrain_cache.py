@@ -14,7 +14,7 @@ import trimesh
 
 _guard = Lock()
 _locks: WeakValueDictionary[str, Lock] = WeakValueDictionary()
-CACHE_VERSION = 1
+CACHE_VERSION = 6
 
 
 def cached_terrain(

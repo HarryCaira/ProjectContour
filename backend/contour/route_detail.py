@@ -4,10 +4,10 @@ from __future__ import annotations
 import numpy as np
 
 
-def resample_route(points: np.ndarray, spacing: float) -> np.ndarray:
+def resample_route(points: np.ndarray, spacing: float, max_points: int = 200_000) -> np.ndarray:
     lengths = np.linalg.norm(np.diff(points, axis=0), axis=1)
     counts = np.maximum(1, np.ceil(lengths / spacing).astype(int))
-    if counts.sum() > 200_000:
+    if counts.sum() > max_points:
         raise ValueError("Route exceeds the production mesh budget")
     pieces = [a + np.arange(n)[:, None] / n * (b - a)
               for a, b, n in zip(points[:-1], points[1:], counts) if np.any(a != b)]

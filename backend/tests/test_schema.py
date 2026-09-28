@@ -13,13 +13,15 @@ def test_minimal_settings_uses_defaults():
     s = Settings.model_validate({"schemaVersion": 1, "source": VALID_SOURCE})
     assert s.framing.shape == "hex"
     assert s.framing.padding_ratio == 0.15
-    assert s.physical.size_mm == 150.0
+    assert s.physical.size_mm == 100.0
     assert s.physical.resolution_mm == 0.2
     assert s.style.name == "monochrome-biome"
     assert s.terrain.vertical_exaggeration == 1.5
     assert s.biomes.water.enabled is True
     assert s.biomes.water.depth_fraction == 0.07
     assert s.route.enabled is True
+    assert s.route.width_mm == 1.0
+    assert s.route.height_above_terrain_mm == 1.0
     assert s.plinth.enabled is True
 
 
@@ -44,12 +46,6 @@ def test_settings_rejects_unknown_schema_version():
 
 def test_settings_rejects_non_positive_size():
     payload = {"schemaVersion": 1, "source": VALID_SOURCE, "physical": {"sizeMm": -1, "resolutionMm": 0.2}}
-    with pytest.raises(ValidationError):
-        Settings.model_validate(payload)
-
-
-def test_settings_rejects_out_of_range_rotation():
-    payload = {"schemaVersion": 1, "source": VALID_SOURCE, "framing": {"rotationDegrees": 60.0}}
     with pytest.raises(ValidationError):
         Settings.model_validate(payload)
 

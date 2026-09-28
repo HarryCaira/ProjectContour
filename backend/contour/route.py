@@ -17,12 +17,23 @@ class Route:
     longitudes: np.ndarray
     elevations: np.ndarray
     name: str | None = None
+    segment_starts: tuple[int, ...] = (0,)
 
     def __post_init__(self) -> None:
         if not (self.latitudes.shape == self.longitudes.shape == self.elevations.shape):
             raise ValueError("Route arrays must have matching shapes")
         if self.latitudes.ndim != 1:
             raise ValueError("Route arrays must be 1-D")
+
+        if (not self.segment_starts or self.segment_starts[0] != 0
+                or any(a >= b for a, b in zip(self.segment_starts, self.segment_starts[1:]))
+                or any(i < 0 or i >= max(1, self.num_points) for i in self.segment_starts)):
+            raise ValueError("Segment starts must begin at zero and increase within the route")
+
+    def segments(self) -> list[Route]:
+        """Independent recorded pieces, in file order."""
+        return [Route(self.latitudes[a:b], self.longitudes[a:b], self.elevations[a:b], self.name)
+                for a, b in zip(self.segment_starts, (*self.segment_starts[1:], self.num_points))]
 
     @property
     def num_points(self) -> int:
@@ -55,4 +66,5 @@ class Route:
         dlon = np.diff(lon)
         a = np.sin(dlat / 2) ** 2 + np.cos(lat[:-1]) * np.cos(lat[1:]) * np.sin(dlon / 2) ** 2
         c = 2 * np.arcsin(np.sqrt(a))
+        c[np.asarray(self.segment_starts[1:], dtype=int) - 1] = 0
         return float(np.sum(R * c))

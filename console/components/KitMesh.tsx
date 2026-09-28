@@ -1,16 +1,22 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState } from "react";
-import { Group, Mesh, MeshStandardMaterial } from "three";
+import { useEffect, useLayoutEffect, useState, useCallback, type RefObject } from "react";
+import { Bvh } from "@react-three/drei";
+import { Group, Mesh, MeshStandardMaterial, TextureLoader, NearestFilter, NoColorSpace } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { normaliseKit, setKitExaggeration, measureKit, setKitColours } from "@/lib/kit-scene";
+import { normaliseKit, prepareTerrainShading, setKitExaggeration, measureKit, setKitColours } from "@/lib/kit-scene";
 
+import { applyLandCover } from "@/lib/landcover-material";
+import type { LandCover } from "@/lib/api";
 import type { ModelColours } from "@/lib/settings";
 
 import { ModelDimensions } from "./ModelDimensions";
 
 interface KitMeshProps {
   glb: ArrayBuffer;
+  landCover?: LandCover;
+  meshSizeMm: number;
+  modelRef: RefObject<Group>;
   colours: ModelColours;
   verticalExaggeration: number;
   modelScale: number;
@@ -22,7 +28,10 @@ interface KitMeshProps {
   onReady: (glb: ArrayBuffer) => void;
 }
 
-export function KitMesh({ glb, colours, verticalExaggeration, modelScale, routeWidthScale, routeHeightScale, physicalSizeMm, showDimensions, onError, onReady }: KitMeshProps) {
+export function KitMesh({ glb, landCover, meshSizeMm, modelRef, colours, verticalExaggeration, modelScale, routeWidthScale, routeHeightScale, physicalSizeMm, showDimensions, onError, onReady }: KitMeshProps) {
+  const attachModel = useCallback((object: Group | null) => {
+    modelRef.current = object ?? new Group();
+  }, [modelRef]);
   const [measurements, setMeasurements] = useState<ReturnType<typeof measureKit> | null>(null);
   const [root, setRoot] = useState<Group | null>(null);
 
@@ -47,6 +56,7 @@ export function KitMesh({ glb, colours, verticalExaggeration, modelScale, routeW
             }
           }
         });
+        prepareTerrainShading(gltf.scene);
         setRoot(normaliseKit(gltf.scene));
       } catch (error) {
         fail(error);
@@ -66,6 +76,20 @@ export function KitMesh({ glb, colours, verticalExaggeration, modelScale, routeW
     if (root) setKitColours(root, colours);
   }, [root, colours]);
 
+  useEffect(() => {
+    if (!root || !landCover) return;
+    let cancelled = false;
+    let restore: (() => void) | undefined;
+    const texture = new TextureLoader().load(landCover.image, loaded => {
+      if (cancelled) return;
+      loaded.colorSpace = NoColorSpace;
+      loaded.minFilter = loaded.magFilter = NearestFilter;
+      loaded.generateMipmaps = false;
+      restore = applyLandCover(root, loaded, landCover.bounds, meshSizeMm);
+    });
+    return () => { cancelled = true; restore?.(); texture.dispose(); };
+  }, [root, landCover, meshSizeMm]);
+
   useLayoutEffect(() => {
     if (root) onReady(glb);
   }, [root, glb, onReady]);
@@ -74,8 +98,10 @@ export function KitMesh({ glb, colours, verticalExaggeration, modelScale, routeW
 
   return (
     <group scale={modelScale}>
-      <primitive object={root} />
-      {showDimensions && measurements && <ModelDimensions {...measurements} />}
+      <Bvh firstHitOnly strategy={0} indirect>
+        <primitive object={root} ref={attachModel} />
+      </Bvh>
+      {measurements && <ModelDimensions modelRef={modelRef} {...measurements} visible={showDimensions} />}
     </group>
   );
 }

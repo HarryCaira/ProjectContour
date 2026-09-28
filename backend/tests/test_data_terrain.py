@@ -173,3 +173,32 @@ def test_fetch_heightmap_uses_cache_on_second_call(tmp_path):
     calls_after_second = len(responses.calls)
 
     assert calls_after_second == calls_after_first  # no new HTTP requests
+
+
+@pytest.mark.parametrize('horizontal', [False, True])
+@pytest.mark.parametrize('edge', [63, 64])
+def test_repair_long_zero_tile_edge(horizontal, edge):
+    from contour.terrain_data import repair_tile_seams
+    source = np.tile(np.linspace(10, 12, 128, dtype=np.float32), (128, 1))
+    expected = source.copy()
+    source[10:110, edge] = 0
+    if horizontal:
+        source, expected = source.T.copy(), expected.T.copy()
+    original = source.copy()
+    repaired = repair_tile_seams(source, 64, 64)
+    np.testing.assert_allclose(repaired, expected, atol=1e-6)
+    np.testing.assert_array_equal(source, original)
+
+
+@pytest.mark.parametrize('kind', ['sea', 'coast', 'short', 'interior', 'nonzero', 'different_sides'])
+def test_repair_preserves_ambiguous_and_valid_elevations(kind):
+    from contour.terrain_data import repair_tile_seams
+    source = np.full((128, 128), 10., dtype=np.float32)
+    source[:, 63] = 0
+    if kind == 'sea': source[:, 62:65] = 0
+    if kind == 'coast': source[:, 64:] = -2
+    if kind == 'short': source[20:, 63] = 10
+    if kind == 'interior': source[:, 63] = 10; source[:, 40] = 0
+    if kind == 'nonzero': source[:, 63] = .1
+    if kind == 'different_sides': source[:, 64:] = 30
+    np.testing.assert_array_equal(repair_tile_seams(source, 64, 64), source)

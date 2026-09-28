@@ -273,7 +273,7 @@ def test__build_mesh_stream__reports_failure_without_exposing_provider_credentia
 def test_mesh_stream_explains_detail_limit(client, monkeypatch):
     upload = client.post("/upload", files={"file": ("track.gpx", SIMPLE_GPX)}).json()
     def fail(*args, **kwargs):
-        raise MeshDetailLimitError()
+        raise MeshDetailLimitError("vertices", 600_000, 600_000)
     monkeypatch.setattr("contour.mesh_progress.build_kit", fail)
     response = client.post("/mesh/stream", json={
         "source": {"id": upload["id"], "sha256": upload["sha256"]},
@@ -281,5 +281,6 @@ def test_mesh_stream_explains_detail_limit(client, monkeypatch):
     event = json.loads(response.text.splitlines()[-1])
     assert event["type"] == "error"
     assert event["code"] == "mesh_detail_limit"
-    assert "smaller physical size" in event["message"]
+    assert "600,000 vertices (limit 600,000)" in event["message"]
+    assert event["details"] == {"reason": "vertices", "count": 600_000, "limit": 600_000}
     assert "try again" not in event["message"].lower()

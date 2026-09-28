@@ -46,9 +46,25 @@ def fetch_water_polygons(
     if not polygons_enu:
         return []
 
-    merged = unary_union(polygons_enu)
+    merged = _join_water_contacts(polygons_enu)
     clipped = merged.intersection(hex_polygon)
     return _flatten_polygons(clipped)
+
+
+def _join_water_contacts(polygons: list[Polygon]):
+    """Give point contacts a tiny finite neck so extruded solids are manifold.
+
+    A one-centimetre closing is far below source precision and print tolerance;
+    it leaves separated lakes apart while removing zero-width land slivers.
+    """
+    merged = unary_union(polygons)
+    pieces = _flatten_polygons(merged)
+    if len(pieces) < 2:
+        return merged
+    left, right = shapely.STRtree(pieces).query(pieces, predicate="intersects")
+    if not np.any(left != right):
+        return merged
+    return merged.buffer(0.01).buffer(-0.01)
 
 
 def extract_water_polygons_enu(

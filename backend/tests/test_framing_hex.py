@@ -48,32 +48,22 @@ def test_hex_centred_on_route_bbox_centroid():
 
 
 def test_hex_has_six_vertices():
-    frame = HexFrame(centre_lon=0, centre_lat=0, circumradius_m=1000, rotation_degrees=0)
+    frame = HexFrame(centre_lon=0, centre_lat=0, circumradius_m=1000)
     verts = frame.vertices_enu()
     assert verts.shape == (6, 2)
 
 
 def test_apothem_relation():
-    frame = HexFrame(centre_lon=0, centre_lat=0, circumradius_m=1000, rotation_degrees=0)
+    frame = HexFrame(centre_lon=0, centre_lat=0, circumradius_m=1000)
     assert frame.apothem_m == pytest.approx(1000 * math.sqrt(3) / 2)
 
 
 def test_pointy_top_first_vertex_is_north():
-    frame = HexFrame(centre_lon=0, centre_lat=0, circumradius_m=1000, rotation_degrees=0)
+    frame = HexFrame(centre_lon=0, centre_lat=0, circumradius_m=1000)
     verts = frame.vertices_enu()
     # First vertex should be at +N (E ~ 0, N = circumradius)
     assert verts[0, 0] == pytest.approx(0, abs=1e-9)
     assert verts[0, 1] == pytest.approx(1000)
-
-
-def test_rotation_rotates_vertices():
-    f0 = HexFrame(centre_lon=0, centre_lat=0, circumradius_m=1000, rotation_degrees=0)
-    f30 = HexFrame(centre_lon=0, centre_lat=0, circumradius_m=1000, rotation_degrees=30)
-    # 30° rotation should move the top vertex to (-500, 866) (approx)
-    v0 = f0.vertices_enu()[0]
-    v30 = f30.vertices_enu()[0]
-    assert v30[0] < v0[0]  # rotated CCW; x decreases
-    assert v30[1] < v0[1]
 
 
 def test_polygon_area_matches_hex_formula():

@@ -95,3 +95,18 @@ def test_triangulation_grid_adds_interior_points():
 def test__triangulate_land__rejects_invalid_density(density: int) -> None:
     with pytest.raises(ValueError, match="must be positive"):
         triangulate_land(_hex_polygon(), [], grid_points_per_side=density)
+
+
+def test__triangulate_land__cleans_near_duplicate_edges_on_disconnected_land() -> None:
+    frame = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    # A river divides the land; a virtually repeated bank vertex previously
+    # bypassed cleanup when the two land components were triangulated separately.
+    water = Polygon([(4, -1), (6, -1), (6, 5), (6, 5 + 1e-14), (6, 11), (4, 11)])
+    assert land_polygon(frame, [water]).geom_type == "MultiPolygon"
+    tri = triangulate_land(frame, [water], grid_points_per_side=10)
+    edges = tri.vertices[np.asarray(tri.boundary_segments)]
+    assert np.linalg.norm(edges[:, 1] - edges[:, 0], axis=1).min() > 1e-8
+    faces = tri.vertices[tri.triangles]
+    ab, ac = faces[:, 1] - faces[:, 0], faces[:, 2] - faces[:, 0]
+    area = np.abs(ab[:, 0] * ac[:, 1] - ab[:, 1] * ac[:, 0]).sum() / 2
+    assert area == pytest.approx(80)

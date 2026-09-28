@@ -55,7 +55,7 @@ def shoreline_water_levels(
 ) -> list[float]:
     """Give each connected water polygon a flat surface below its own shoreline.
 
-    Use the lowest sampled bank to avoid water protruding through lower land.
+    Use the median sampled bank to avoid carving the whole shore to one low outlier.
     Ignore artificial shorelines created where the frame cuts through water.
     Clamp the recess to preserve a positive solid above the shared model base.
     """
@@ -64,7 +64,7 @@ def shoreline_water_levels(
     hex_polygon = frame.polygon_enu()
     spacing = 2 * frame.circumradius_m / 100
     local_enu = frame.local_enu()
-    levels: list[float] = []
+    bank_samples: list[np.ndarray] = []
     for polygon in water_polygons:
         if polygon.is_empty or not polygon.is_valid:
             raise ValueError("Water polygon must be valid and non-empty")
@@ -79,7 +79,29 @@ def shoreline_water_levels(
         elevations = sample_at_enu(heightmap, shoreline, local_enu)
         if not np.all(np.isfinite(elevations)):
             raise ValueError("Water shoreline contains invalid elevations")
-        bank_z = float(elevations.min())
+        bank_samples.append(elevations)
+
+    # Point-touching polygons remain separate in a MultiPolygon, but cannot
+    # have conflicting heights at their shared shoreline. Group transitively
+    # and use the same pooled bank samples for each connected water body.
+    parents = list(range(len(water_polygons)))
+    def root(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+    tree = shapely.STRtree(water_polygons)
+    if water_polygons:
+        left, right = tree.query(water_polygons, predicate="intersects")
+        for a, b in zip(left, right):
+            parents[root(int(b))] = root(int(a))
+    groups: dict[int, list[np.ndarray]] = {}
+    for index, samples in enumerate(bank_samples):
+        groups.setdefault(root(index), []).append(samples)
+    bank_levels = {key: float(np.median(np.concatenate(samples))) for key, samples in groups.items()}
+    levels: list[float] = []
+    for index in range(len(water_polygons)):
+        bank_z = bank_levels[root(index)]
         if bank_z <= bottom_z:
             raise ValueError("Water shoreline must be above the model base")
         top_z = bank_z - min(recess_m, (bank_z - bottom_z) * 0.5)

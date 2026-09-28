@@ -132,3 +132,36 @@ def test__build_water_mesh__rejects_missing_level():
     water = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
     with pytest.raises(ValueError, match="surface level"):
         build_water_mesh([water], top_z=[], bottom_z=-10)
+
+
+def test__shoreline_water_levels__low_outlier_does_not_lower_entire_lake(shoreline_scene, monkeypatch) -> None:
+    frame, heightmap, low, _ = shoreline_scene
+    def sample_banks(hm, points, enu):
+        values = np.full(len(points), 100.0)
+        values[0] = 60
+        return values
+    monkeypatch.setattr('contour.water_mesh.sample_at_enu', sample_banks)
+    mesh = build_shoreline_water_mesh([low], heightmap, frame, bottom_z=0, recess_m=0)
+    assert mesh.bounds[1, 2] == pytest.approx(100)
+
+
+def test_point_touching_water_uses_one_level_transitively(monkeypatch):
+    from shapely.geometry import box
+    from contour.water_mesh import shoreline_water_levels
+    from contour.surface_processing import shoreline_sampler
+
+    frame = HexFrame(centre_lat=0, centre_lon=0, circumradius_m=1000)
+    heightmap = Heightmap(np.zeros((16, 16)), 14, 0, 0)
+    # Three regions touch only at corners, and a fourth lake is independent.
+    polygons = [box(0, 0, 10, 10), box(10, 10, 20, 20),
+                box(20, 20, 30, 30), box(100, 100, 110, 110)]
+    base = lambda points: 100 + points[:, 0]
+    monkeypatch.setattr('contour.water_mesh.sample_at_enu', lambda h, points, enu: base(points))
+    levels = shoreline_water_levels(polygons, heightmap, frame, 0, 0)
+    assert levels[0] == levels[1] == levels[2]
+    assert levels[3] > levels[0]
+    reversed_levels = shoreline_water_levels(polygons[::-1], heightmap, frame, 0, 0)
+    np.testing.assert_allclose(levels, reversed_levels[::-1])
+    surface = shoreline_sampler(base, polygons, levels, 20)
+    points = np.array([[10 - 1e-6, 10 + 1e-6], [10., 10.], [10 + 1e-6, 10 - 1e-6]])
+    assert np.ptp(surface(points)) < 1e-6
