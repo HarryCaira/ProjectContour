@@ -1,5 +1,23 @@
+import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { ModelColours } from "./settings";
 import { Box3, Group, Mesh, MeshStandardMaterial, Matrix3, Vector3 } from "three";
+
+/** Smooth terrain lighting while retaining sharp cut walls and plinth edges.
+ * This affects the preview normals only; printable vertex positions stay intact.
+ */
+export function prepareTerrainShading(scene: Group): void {
+  scene.traverse((object) => {
+    if (!(object instanceof Mesh) || object.name !== "land") return;
+    object.geometry = toCreasedNormals(object.geometry, Math.PI / 4);
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      if (material instanceof MeshStandardMaterial) {
+        material.flatShading = false;
+        material.needsUpdate = true;
+      }
+    }
+  });
+}
 
 interface RouteVertices {
   mesh: Mesh;
@@ -104,6 +122,7 @@ export function setKitExaggeration(root: Group, exaggeration: number, widthScale
       mesh.geometry.computeVertexNormals();
       mesh.geometry.computeBoundingBox();
       mesh.geometry.computeBoundingSphere();
+      mesh.geometry.boundsTree?.refit();
     }
   }
 }

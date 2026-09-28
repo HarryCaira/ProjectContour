@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 
 class TileCache:
@@ -26,6 +27,9 @@ class TileCache:
     def set(self, provider: str, layer: str, z: int, x: int, y: int, ext: str, data: bytes) -> None:
         path = self._path(provider, layer, z, x, y, ext)
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_bytes(data)
-        tmp.replace(path)
+        tmp = path.with_name(f".{path.name}-{uuid4().hex}.tmp")
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(path)
+        finally:
+            tmp.unlink(missing_ok=True)

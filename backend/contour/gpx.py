@@ -13,8 +13,8 @@ def parse_gpx(data: bytes) -> Route:
     """Parse GPX bytes into a normalised Route.
 
     Handles real-world quirks:
-    - Multi-track / multi-segment files: takes the first non-empty segment;
-      falls back to the first non-empty <rte> if no tracks have points.
+    - Preserves every non-empty track segment, including recording gaps;
+      falls back to all non-empty <rte> elements if no tracks have points.
     - Missing elevation: forward-fills and back-fills from neighbours; if every
       point lacks elevation, returns zeros (DEM-based imputation is a later stage).
     - Empty or malformed input: raises ValueError with an actionable message.
@@ -29,30 +29,28 @@ def parse_gpx(data: bytes) -> Route:
     except Exception as e:
         raise ValueError(f"GPX file could not be parsed: {e}") from e
 
-    points, name = _find_first_points(gpx)
-    if not points:
+    segments = [(segment.points, track.name) for track in gpx.tracks
+                for segment in track.segments if segment.points]
+    if not segments:
+        segments = [(route.points, route.name) for route in gpx.routes if route.points]
+    if not segments:
         raise ValueError("GPX file contains no track or route points.")
 
-    lats = np.array([p.latitude for p in points], dtype=np.float64)
-    lons = np.array([p.longitude for p in points], dtype=np.float64)
-    raw_eles = np.array(
-        [p.elevation if p.elevation is not None else np.nan for p in points],
-        dtype=np.float64,
-    )
-    eles = _fill_elevations(raw_eles)
-
-    return Route(latitudes=lats, longitudes=lons, elevations=eles, name=name)
-
-
-def _find_first_points(gpx: gpxpy.gpx.GPX) -> tuple[list, str | None]:
-    for track in gpx.tracks:
-        for segment in track.segments:
-            if segment.points:
-                return segment.points, track.name
-    for route in gpx.routes:
-        if route.points:
-            return route.points, route.name
-    return [], None
+    starts = []
+    latitudes, longitudes, elevations = [], [], []
+    for points, _ in segments:
+        starts.append(len(latitudes))
+        latitudes.extend(p.latitude for p in points)
+        longitudes.extend(p.longitude for p in points)
+        # Do not fill missing heights across a recording break.
+        elevations.extend(_fill_elevations(np.array([
+            p.elevation if p.elevation is not None else np.nan for p in points
+        ], dtype=np.float64)))
+    return Route(latitudes=np.asarray(latitudes, dtype=np.float64),
+                 longitudes=np.asarray(longitudes, dtype=np.float64),
+                 elevations=np.asarray(elevations, dtype=np.float64),
+                 name=next((name for _, name in segments if name), None),
+                 segment_starts=tuple(starts))
 
 
 def _fill_elevations(eles: np.ndarray) -> np.ndarray:

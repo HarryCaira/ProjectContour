@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from PIL import Image
 
+from contour.errors import MeshDetailLimitError
 from contour.hex_frame import HexFrame
 from contour.tiles import RasterTile, tiles_covering_bbox
 from contour.tile_cache import TileCache
@@ -29,9 +30,11 @@ def fetch_heightmap(
     cache: TileCache,
     mapbox_token: str,
     max_concurrent: int = 8,
+    maximum_source_detail: bool = False,
+    sample_mm: float = TERRAIN_SAMPLE_MM, max_zoom: int = MAX_TERRAIN_ZOOM, max_tiles: int = 1024,
 ) -> Heightmap:
     """Pick a zoom level, fetch all covering Terrain-RGB tiles, stitch into a Heightmap."""
-    zoom = select_zoom(hex_frame, physical)
+    zoom = select_zoom(hex_frame, physical, maximum_source_detail=maximum_source_detail, sample_mm=sample_mm, max_zoom=max_zoom, max_tiles=max_tiles)
     west, south, east, north = _hex_geographic_bbox(hex_frame)
     tiles = tiles_covering_bbox(west, south, east, north, zoom)
 
@@ -46,18 +49,18 @@ def fetch_heightmap(
     return stitch_heightmap(tile_arrays, zoom)
 
 
-def select_zoom(hex_frame: HexFrame, physical: Physical, max_tiles: int = 1024) -> int:
+def select_zoom(hex_frame: HexFrame, physical: Physical, max_tiles: int = 1024, maximum_source_detail: bool = False, sample_mm: float = TERRAIN_SAMPLE_MM, max_zoom: int = MAX_TERRAIN_ZOOM) -> int:
     """Pick the lowest zoom meeting our fixed production sampling target.
     Stop at native terrain detail or the tile budget, whichever comes first.
     The legacy resolutionMm field is accepted but no longer controls quality."""
     centre_lat_rad = math.radians(hex_frame.centre_lat)
     minx, miny, maxx, maxy = hex_frame.polygon_enu().bounds
     model_world_diameter_m = max(maxx - minx, maxy - miny)
-    model_pixel_count = physical.size_mm / TERRAIN_SAMPLE_MM
+    model_pixel_count = physical.size_mm / sample_mm
     target_meters_per_pixel = model_world_diameter_m / model_pixel_count
 
     last_within_budget: int | None = None
-    for zoom in range(1, MAX_TERRAIN_ZOOM + 1):
+    for zoom in range(1, max_zoom + 1):
         meters_per_pixel = EARTH_CIRCUMFERENCE_M * math.cos(centre_lat_rad) / (256 * (2**zoom))
         tile_size_m = 256 * meters_per_pixel
         n_tiles_axis = math.ceil(model_world_diameter_m / tile_size_m) + 1
@@ -66,13 +69,16 @@ def select_zoom(hex_frame: HexFrame, physical: Physical, max_tiles: int = 1024) 
         if n_tiles > max_tiles:
             break
         last_within_budget = zoom
-        if meters_per_pixel <= target_meters_per_pixel:
+        if not maximum_source_detail and meters_per_pixel <= target_meters_per_pixel:
             return zoom
 
+    if maximum_source_detail and last_within_budget != max_zoom:
+        native_pixel_size = EARTH_CIRCUMFERENCE_M * math.cos(centre_lat_rad) / (256 * 2**max_zoom)
+        estimate = (math.ceil(model_world_diameter_m / (256 * native_pixel_size)) + 1)**2
+        raise MeshDetailLimitError("tiles", estimate, max_tiles, details={"zoom": max_zoom})
+
     if last_within_budget is None:
-        raise ValueError(
-            f"Hex too large for tile budget: even zoom 1 would need more than {max_tiles} tiles."
-        )
+        raise MeshDetailLimitError("tiles", n_tiles, max_tiles, details={"zoom": zoom})
     return last_within_budget
 
 
@@ -108,12 +114,39 @@ def stitch_heightmap(tiles: dict[tuple[int, int], np.ndarray], zoom: int) -> Hei
         elevations[row * tile_h : (row + 1) * tile_h, col * tile_w : (col + 1) * tile_w] = tile
 
     return Heightmap(
-        elevations=elevations,
+        elevations=repair_tile_seams(elevations, tile_h, tile_w),
         zoom=zoom,
         tile_origin_x=min_x,
         tile_origin_y=min_y,
         tile_size=tile_h,
     )
+
+
+def repair_tile_seams(elevations: np.ndarray, tile_height: int, tile_width: int) -> np.ndarray:
+    """Repair long, one-pixel zero stripes exactly on internal tile edges.
+
+    Zero is a valid elevation, so require 32 consecutive suspect samples with
+    comparable, same-sign terrain on both sides, each at least one metre from
+    zero. Interpolate only those samples; leave coastlines and ambiguous data
+    untouched. Source tiles and the caller's array remain unchanged.
+    """
+    repaired = elevations.copy()
+    for source, target, tile_size in ((elevations, repaired, tile_width),
+                                      (elevations.T, repaired.T, tile_height)):
+        for boundary in range(tile_size, source.shape[1], tile_size):
+            for column in (boundary - 1, boundary):
+                if column < 1 or column + 1 >= source.shape[1]:
+                    continue
+                left, centre, right = source[:, column - 1], source[:, column], source[:, column + 1]
+                minimum = np.minimum(np.abs(left), np.abs(right))
+                suspect = ((centre == 0) & np.isfinite(left) & np.isfinite(right)
+                           & (left * right > 0) & (minimum >= 1)
+                           & (np.abs(left - right) <= np.maximum(1, minimum * .5)))
+                transitions = np.diff(np.r_[False, suspect, False].astype(np.int8))
+                for start, stop in zip(np.flatnonzero(transitions == 1), np.flatnonzero(transitions == -1)):
+                    if stop - start >= 32:
+                        target[start:stop, column] = (left[start:stop] + right[start:stop]) / 2
+    return repaired
 
 
 def _fetch_tile_with_cache(

@@ -13,11 +13,10 @@ export const SourceSchema = z.object({
 export const FramingSchema = z.object({
   shape: z.literal("hex").default("hex"),
   paddingRatio: z.number().min(0).max(1).default(0.15),
-  rotationDegrees: z.number().min(0).lt(60).default(0),
 });
 
 export const PhysicalSchema = z.object({
-  sizeMm: z.number().positive().default(150),
+  sizeMm: z.number().positive().default(100),
   resolutionMm: z.number().positive().default(0.2),
 });
 
@@ -35,7 +34,28 @@ export const StyleRefSchema = z.object({
   colours: ColoursSchema.default({}),
 });
 
+export const DetailSettingsSchema = z.object({
+  forceSourceZoom: z.boolean().default(false),
+  sampleMm: z.number().min(0.01).max(2).default(0.1),
+  toleranceMm: z.number().min(0.001).max(0.5).default(0.0125),
+  maxZoom: z.number().int().min(1).max(15).default(15),
+  waterZoom: z.number().int().min(1).max(16).default(14),
+  smoothingSigma: z.number().min(0).max(8).default(2.0),
+  smoothingMaxMm: z.number().min(0).max(1).default(0.05),
+  shorelinePixels: z.number().min(0.1).max(32).default(8.0),
+  routeToleranceMm: z.number().min(0.001).max(0.5).default(0.0125),
+  sourceRouteToleranceM: z.number().min(0.001).max(5).default(0.025),
+  maxVertices: z.number().int().min(1000).max(5000000).default(1200000),
+  maxReferencePoints: z.number().int().min(1000).max(32000000).default(8000000),
+  maxPasses: z.number().int().min(1).max(64).default(16),
+  maxTiles: z.number().int().min(1).max(4096).default(1024),
+  maxRoutePoints: z.number().int().min(1000).max(1000000).default(200000),
+});
+export type DetailSettings = z.infer<typeof DetailSettingsSchema>;
+
 export const TerrainSettingsSchema = z.object({
+  detail: DetailSettingsSchema.optional(),
+  maximumSourceDetail: z.boolean().default(false),
   verticalExaggeration: z.number().positive().default(1.5),
 });
 
@@ -50,8 +70,8 @@ export const BiomesSchema = z.object({
 
 export const RouteSettingsSchema = z.object({
   enabled: z.boolean().default(true),
-  widthMm: z.number().positive().default(0.5),
-  heightAboveTerrainMm: z.number().min(0).default(0.5),
+  widthMm: z.number().positive().default(1),
+  heightAboveTerrainMm: z.number().min(0).default(1),
 });
 
 export const PlinthSchema = z.object({

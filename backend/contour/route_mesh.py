@@ -1,6 +1,8 @@
 """Route mesh: GPX line -> ribbon extruded above the land surface."""
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 import trimesh
 
@@ -19,10 +21,12 @@ def build_route_mesh(
     width_m: float,
     height_above_terrain_m: float,
     max_segments: int = 500,
+    max_points: int = 200_000,
     vertical_exaggeration: float = 1.0,
     elevation_origin_m: float = 0.0,
     surface_tolerance_m: float | None = None,
     sample_spacing_m: float | None = None,
+    surface_sampler: Callable[[np.ndarray], np.ndarray] | None = None,
 ) -> trimesh.Trimesh | None:
     """Build a watertight ribbon that follows the route, sampled onto the terrain.
 
@@ -35,6 +39,32 @@ def build_route_mesh(
     if route.num_points < 2:
         return None
 
+    if len(route.segment_starts) > 1:
+        segments = [segment for segment in route.segments() if segment.num_points >= 2]
+        if surface_tolerance_m is not None:
+            if sample_spacing_m is None or sample_spacing_m <= 0 or surface_tolerance_m <= 0:
+                raise ValueError("Route detail requires positive spacing and tolerance")
+            # The budget covers the whole file, not each recording independently.
+            count = 0
+            for segment in segments:
+                xy = hex_frame.local_enu().to_enu(segment.latitudes, segment.longitudes, 0.0)[:, :2]
+                count += int(np.maximum(1, np.ceil(np.linalg.norm(np.diff(xy, axis=0), axis=1) / sample_spacing_m)).sum())
+            if count > max_points:
+                raise ValueError("Route exceeds the production mesh budget")
+        pieces = [build_route_mesh(segment, hex_frame, heightmap, width_m, height_above_terrain_m,
+                  max_segments=max_segments, max_points=max_points,
+                  vertical_exaggeration=vertical_exaggeration, elevation_origin_m=elevation_origin_m,
+                  surface_tolerance_m=surface_tolerance_m, sample_spacing_m=sample_spacing_m,
+                  surface_sampler=surface_sampler) for segment in segments]
+        pieces = [piece for piece in pieces if piece is not None]
+        if not pieces:
+            return None
+        combined = trimesh.util.concatenate(pieces)
+        # Preserve the custom GLB attribute used for instant route resizing.
+        combined.vertex_attributes["_route_offset"] = np.concatenate([
+            piece.vertex_attributes["_route_offset"] for piece in pieces])
+        return combined
+
     local_enu = hex_frame.local_enu()
     enu_pts = local_enu.to_enu(route.latitudes, route.longitudes, 0.0)
     pts_2d = enu_pts[:, :2]
@@ -43,7 +73,7 @@ def build_route_mesh(
     if surface_tolerance_m is not None:
         if sample_spacing_m is None or sample_spacing_m <= 0 or surface_tolerance_m <= 0:
             raise ValueError("Route detail requires positive spacing and tolerance")
-        pts_2d = resample_route(pts_2d, sample_spacing_m)
+        pts_2d = resample_route(pts_2d, sample_spacing_m, max_points=max_points)
     elif len(pts_2d) > max_segments:
         idx = np.linspace(0, len(pts_2d) - 1, max_segments + 1).astype(int)
         pts_2d = pts_2d[idx]
@@ -52,7 +82,7 @@ def build_route_mesh(
     if n < 2:
         return None
 
-    terrain_z = sample_at_enu(heightmap, pts_2d, local_enu)
+    terrain_z = surface_sampler(pts_2d) if surface_sampler is not None else sample_at_enu(heightmap, pts_2d, local_enu)
     if surface_tolerance_m is not None:
         metric = np.column_stack((pts_2d, terrain_z * max(vertical_exaggeration, PREVIEW_MAX_EXAGGERATION)))
         keep = simplify_route(metric, surface_tolerance_m)

@@ -76,7 +76,7 @@ def test_parse_simple_gpx():
     assert route.name == "Test track"
 
 
-def test_parse_multi_track_picks_first_non_empty():
+def test_parse_multi_track_skips_empty_tracks():
     route = parse_gpx(MULTI_TRACK_GPX)
     assert route.num_points == 2
     assert route.name == "Real"
@@ -127,3 +127,25 @@ def test_route_bbox_and_centroid():
 def test_route_distance_km_positive():
     route = parse_gpx(SIMPLE_GPX)
     assert route.distance_km() > 0
+
+
+def test_all_tracks_segments_preserve_breaks_and_isolate_elevations():
+    route = parse_gpx(b'''<gpx version="1.1" creator="test">
+      <trk><trkseg/><trkseg><trkpt lat="0" lon="0"><ele>10</ele></trkpt>
+        <trkpt lat="0" lon="0.001"/></trkseg>
+        <trkseg><trkpt lat="1" lon="1"/><trkpt lat="1" lon="1.001"/></trkseg></trk>
+      <trk><trkseg><trkpt lat="2" lon="2"/></trkseg></trk></gpx>''')
+    assert route.num_points == 5
+    assert route.segment_starts == (0, 2, 4)
+    assert list(route.elevations) == [10, 10, 0, 0, 0]
+    assert route.distance_km() == pytest.approx(sum(s.distance_km() for s in route.segments()))
+    assert route.distance_km() < .23
+    assert route.bbox == (0, 0, 2, 2)
+
+
+def test_multiple_route_elements_keep_breaks():
+    route = parse_gpx(b'''<gpx version="1.1" creator="test">
+      <rte><rtept lat="0" lon="0"/><rtept lat="0" lon="0.001"/></rte>
+      <rte><rtept lat="1" lon="1"/><rtept lat="1" lon="1.001"/></rte></gpx>''')
+    assert route.num_points == 4
+    assert route.segment_starts == (0, 2)

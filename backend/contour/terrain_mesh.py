@@ -11,6 +11,9 @@ from shapely.geometry import Polygon
 from contour.hex_frame import HexFrame
 from contour.hex_clip import triangulate_land, land_polygon
 from contour.terrain_refinement import refine_terrain
+from contour import terrain_refinement
+from contour.errors import MeshDetailLimitError
+from contour.source_grid import source_grid_points
 from contour.sampling import sample_at_enu
 from contour.heightmap import Heightmap
 
@@ -25,6 +28,9 @@ def build_land_mesh(
     surface_tolerance_m: float | None = None,
     sample_spacing_m: float | None = None,
     checkpoint: Callable[[], None] | None = None,
+    surface_sampler: Callable[[np.ndarray], np.ndarray] | None = None,
+    native_source_grid: bool = False,
+    max_vertices: int | None = None, max_reference_points: int | None = None, max_passes: int | None = None,
 ) -> trimesh.Trimesh:
     """Build a watertight land solid from the heightmap, clipped to the hex with
     water polygons as holes.
@@ -35,12 +41,20 @@ def build_land_mesh(
     - Walls: vertical strips along every boundary segment (outer hex + water holes),
              from heightmap elevation down to `base_z`.
     """
+    max_vertices = terrain_refinement.MAX_VERTICES if max_vertices is None else max_vertices
     hex_poly = hex_frame.polygon_enu()
     if water_polygons and hex_poly.difference(shapely.union_all(water_polygons)).is_empty:
         return trimesh.Trimesh()
     local_enu = hex_frame.local_enu()
 
-    tri = triangulate_land(hex_poly, water_polygons, grid_points_per_side=grid_points_per_side)
+    native_points = None
+    if native_source_grid:
+        native_points = source_grid_points(heightmap, hex_frame, land_polygon(hex_poly, water_polygons), checkpoint, max_vertices=max_vertices)
+    tri = triangulate_land(hex_poly, water_polygons, grid_points_per_side=grid_points_per_side,
+                           interior_points=native_points)
+    if native_source_grid and len(tri.vertices) > max_vertices:
+        raise MeshDetailLimitError("vertices", len(tri.vertices), max_vertices,
+                                   details={"stage": "native_source_grid_with_boundary"})
     vertices_2d = tri.vertices
 
     if water_levels is not None and len(water_levels) != len(water_polygons):
@@ -49,6 +63,8 @@ def build_land_mesh(
     shorelines = shapely.STRtree([polygon.boundary for polygon in water_polygons])
 
     def sample_surface(points_2d: np.ndarray) -> np.ndarray:
+        if surface_sampler is not None:
+            return surface_sampler(points_2d)
         elevations = sample_at_enu(heightmap, points_2d, local_enu)
         if water_levels is not None:
             points = shapely.points(points_2d)
@@ -67,11 +83,12 @@ def build_land_mesh(
                 elevations[ids[distance <= tolerance]] = level
         return elevations
 
-    if surface_tolerance_m is not None:
+    if surface_tolerance_m is not None and not native_source_grid:
         if sample_spacing_m is None:
             raise ValueError("Adaptive terrain requires a reference spacing")
         tri = refine_terrain(tri, sample_surface, land_polygon(hex_poly, water_polygons),
-                             sample_spacing_m, surface_tolerance_m, checkpoint=checkpoint)
+                             sample_spacing_m, surface_tolerance_m, checkpoint=checkpoint, max_vertices=max_vertices,
+                             max_reference_points=max_reference_points, max_passes=max_passes)
         vertices_2d = tri.vertices
     elevations = sample_surface(vertices_2d)
 

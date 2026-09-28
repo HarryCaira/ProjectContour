@@ -14,6 +14,8 @@ export function EditorPanel() {
   const setVerticalExaggeration = useEditorStore((s) => s.setVerticalExaggeration);
 
   const exportMut = useExport();
+  const showLandCover = useEditorStore(s => s.showLandCover);
+  const setShowLandCover = useEditorStore(s => s.setShowLandCover);
 
   return (
     <aside className="w-[320px] shrink-0 border-l border-line bg-canvas h-full flex flex-col">
@@ -79,40 +81,28 @@ export function EditorPanel() {
                 step={0.05}
                 onChange={setVerticalExaggeration}
               />
+
             </section>
 
             <Divider />
 
             <section className="space-y-4">
-              <h2 className="text-xs uppercase tracking-wider text-muted">Model size</h2>
-              <Slider
-                label="Physical size"
-                value={settings.physical.sizeMm}
-                min={50}
-                max={300}
-                step={1}
-                unit="mm"
-                onChange={(sizeMm) =>
-                  updateSettings((s) => ({ ...s, physical: { ...s.physical, sizeMm } }))
-                }
-              />
-              <Slider
-                label="Frame rotation"
-                value={settings.framing.rotationDegrees}
-                min={0}
-                max={59.99}
-                step={1}
-                unit="°"
-                onChange={(rotationDegrees) =>
-                  updateSettings((s) => ({
-                    ...s,
-                    framing: { ...s.framing, rotationDegrees },
-                  }))
-                }
-              />
+              <h2 className="text-xs uppercase tracking-wider text-muted">Model</h2>
+              <fieldset className="space-y-2">
+                <legend className="text-xs uppercase tracking-wider text-muted">Physical size</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  {([{ label: "Medium", sizeMm: 100 }, { label: "Large", sizeMm: 150 }] as const).map(({ label, sizeMm }) => (
+                    <label key={sizeMm} className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm ${settings.physical.sizeMm === sizeMm ? "border-ink text-ink" : "border-line text-muted"}`}>
+                      <input type="radio" name="physical-size" value={sizeMm}
+                        checked={settings.physical.sizeMm === sizeMm}
+                        onChange={() => updateSettings((s) => ({ ...s, physical: { ...s.physical, sizeMm } }))}
+                        className="accent-accent" />
+                      <span>{label}<span className="block text-xs text-muted">{sizeMm} mm</span></span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
             </section>
-
-            <Divider />
 
             <section className="space-y-3">
               <div className="flex items-center justify-between">
@@ -122,6 +112,11 @@ export function EditorPanel() {
                   Reset
                 </button>
               </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={showLandCover} onChange={e => setShowLandCover(e.target.checked)} className="accent-accent" />
+                Woodland and rock
+              </label>
+              <p className="text-xs text-muted">Preview only. Woodland is dark green; rock is grey. These colours are not included in the STL kit.</p>
               {(["route", "terrain", "water"] as const).map((part) => {
                 const colour = settings.style.colours?.[part] ?? DEFAULT_COLOURS[part];
                 return (

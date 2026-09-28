@@ -1,22 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
+import { Group } from "three";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment } from "@react-three/drei";
 import { useEditorStore } from "@/lib/editor-store";
 import { DEFAULT_COLOURS } from "@/lib/settings";
+import { useQuery } from "@tanstack/react-query";
+import { fetchLandCover } from "@/lib/api";
 import { useMesh } from "@/lib/hooks";
 import { ScaleBanana } from "./ScaleBanana";
 import { ModelProgress } from "./ModelProgress";
 import { KitMesh } from "./KitMesh";
 
 export function Scene() {
+  const modelRef = useRef<Group>(new Group());
   const [showDimensions, setShowDimensions] = useState(true);
   const [showBanana, setShowBanana] = useState(true);
   const [readyGlb, setReadyGlb] = useState<ArrayBuffer | null>(null);
   const [viewerError, setViewerError] = useState<Error | null>(null);
   const settings = useEditorStore((s) => s.settings);
   const meshQuery = useMesh(settings);
+  const showLandCover = useEditorStore(s => s.showLandCover);
+  const coverQuery = useQuery({
+    queryKey: ["landcover", settings?.source, settings?.framing],
+    queryFn: ({ signal }) => fetchLandCover(settings!, signal),
+    enabled: !!settings && showLandCover,
+    staleTime: Infinity, retry: false,
+  });
 
   return (
     <div className="relative h-full w-full bg-canvas">
@@ -34,6 +45,9 @@ export function Scene() {
           <KitMesh
             key={meshQuery.dataUpdatedAt}
             glb={meshQuery.data.glb}
+            modelRef={modelRef}
+            landCover={showLandCover && meshQuery.matchesCoverage ? coverQuery.data : undefined}
+            meshSizeMm={meshQuery.data.physicalSizeMm ?? 100}
             colours={settings?.style.colours ?? DEFAULT_COLOURS}
             onReady={setReadyGlb}
             onError={setViewerError}
@@ -46,7 +60,7 @@ export function Scene() {
           />
         ) : null}
         {meshQuery.data && settings && showBanana && (
-          <ScaleBanana sizeMm={settings.physical.sizeMm} viewScale={1} />
+          <ScaleBanana modelRef={modelRef} sizeMm={settings.physical.sizeMm} viewScale={1} />
         )}
         <OrbitControls
           enableDamping
@@ -58,7 +72,8 @@ export function Scene() {
       </Canvas>
 
       {settings && (
-        <div className="absolute top-5 left-5 flex gap-2">
+        <div className="absolute top-5 left-5 right-44 flex flex-col items-start gap-3">
+        <div className="flex flex-wrap gap-2">
         <label className="flex items-center gap-2 rounded-lg border border-line bg-canvas/95 px-3 py-2 text-xs text-muted">
           <input type="checkbox" checked={showBanana} onChange={(event) => setShowBanana(event.target.checked)}
             className="accent-accent" />
@@ -69,6 +84,8 @@ export function Scene() {
             className="accent-accent" />
           Dimensions
         </label>
+
+        </div>
         </div>
       )}
       {settings && (
@@ -77,6 +94,12 @@ export function Scene() {
           className="absolute top-5 right-5 rounded-lg border border-line bg-canvas/95 px-3 py-2 text-xs text-muted disabled:opacity-50">
           Rebuild preview
         </button>
+      )}
+      {settings && showLandCover && (
+        <div className="absolute bottom-12 left-5 max-w-sm rounded-md bg-canvas/90 px-3 py-2 text-xs text-muted">
+          {coverQuery.isPending ? "Mapping woodland and rock…" : coverQuery.isError ? "Land cover unavailable. Terrain remains visible." :
+            `Mapped woodland ${coverQuery.data.percentages.wood}% · rock ${coverQuery.data.percentages.rock}%`}
+        </div>
       )}
       {meshQuery.isFetching && meshQuery.data && (
         <div role="status" className="absolute bottom-6 right-6 rounded-lg bg-canvas/90 px-3 py-2 text-xs text-muted">

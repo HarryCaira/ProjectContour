@@ -10,6 +10,8 @@ from contour.mesh_progress import stream_mesh
 from contour.gltf_export import to_glb
 from contour.stl_export import to_stl_zip
 from contour.gpx import parse_gpx
+from contour.hex_frame import hex_frame_for_route
+from contour.landcover import fetch_landcover
 from contour.pipeline import PipelineDependencies, build_kit
 from contour.settings import Settings
 from contour.gpx_store import GpxStore
@@ -113,3 +115,15 @@ def _validate_source(store: GpxStore, settings: Settings) -> None:
         raise HTTPException(status_code=404, detail=f"GPX {settings.source.id} not found")
     if not store.verify_hash(settings.source.id, settings.source.sha256):
         raise HTTPException(status_code=409, detail="Source GPX hash mismatch")
+
+
+@router.post("/landcover")
+def landcover_preview(
+    settings: Settings,
+    store: GpxStore = Depends(get_gpx_store),
+    deps: PipelineDependencies = Depends(get_pipeline_deps),
+) -> dict:
+    _validate_source(store, settings)
+    route = parse_gpx(store.load(settings.source.id))
+    frame = hex_frame_for_route(route, padding_ratio=settings.framing.padding_ratio)
+    return fetch_landcover(frame, deps.http_client, deps.tile_cache, deps.mapbox_token)

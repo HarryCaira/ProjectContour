@@ -4,6 +4,8 @@ from __future__ import annotations
 import io
 import zipfile
 
+import contour.pipeline as pipeline_module
+
 import trimesh
 
 import mapbox_vector_tile
@@ -169,7 +171,7 @@ def test__build_kit__physical_units_and_fixed_route_height(tmp_path, size_mm):
         xy, groups = np.unique(route.vertices[:, :2], axis=0, return_inverse=True)
         for index in range(len(xy)):
             zs = route.vertices[groups == index, 2]
-            assert np.ptp(zs) == pytest.approx(0.5)
+            assert np.ptp(zs) == pytest.approx(1.0)
     assert np.allclose(kits[0].part("plinth").mesh.bounds, kits[1].part("plinth").mesh.bounds)
     pivot = kits[0].part("plinth").mesh.bounds[1, 2]
     top1 = kits[0].part("land").mesh.bounds[1, 2]
@@ -184,7 +186,7 @@ def test_water_is_a_surface_insert_with_solid_terrain_below(tmp_path, monkeypatc
     _add_terrain_mock()
     area = {}
 
-    def water_polygons(frame, *_):
+    def water_polygons(frame, *_, **kwargs):
         hexagon = frame.polygon_enu()
         r = frame.circumradius_m
         if shape == "full":
@@ -215,3 +217,64 @@ def test_water_is_a_surface_insert_with_solid_terrain_below(tmp_path, monkeypatc
     # hexagonal prism: no through-holes and no overlapping material volumes.
     expected = area["hex"] * area["scale"] ** 2 * available_height
     assert land.volume + water.volume == pytest.approx(expected, rel=2e-4)
+
+
+@responses.activate
+def test__build_kit__source_detail_bypasses_smoothing_and_has_separate_cache(tmp_path, monkeypatch):
+    _add_terrain_mock()
+    _add_biomes_mock()
+    original_smooth = pipeline_module.smooth_heightmap
+    original_land = pipeline_module.build_land_mesh
+    smoothing_calls = []
+    tolerances = []
+    def smooth(heightmap, scale, **kwargs):
+        smoothing_calls.append(scale)
+        return original_smooth(heightmap, scale, **kwargs)
+    def land(*args, **kwargs):
+        tolerances.append(kwargs['surface_tolerance_m'])
+        return original_land(*args, **kwargs)
+    monkeypatch.setattr(pipeline_module, 'smooth_heightmap', smooth)
+    monkeypatch.setattr(pipeline_module, 'build_land_mesh', land)
+    deps = _deps(tmp_path)
+    normal = _settings()
+    detailed = _settings(terrain={'maximumSourceDetail': True})
+    build_kit(normal, _route(), deps)
+    build_kit(detailed, _route(), deps)
+    build_kit(detailed, _route(), deps)
+    assert len(smoothing_calls) == 1
+    assert len(tolerances) == 2
+    assert tolerances[-1] is None
+    assert len(list((tmp_path / '_derived' / 'terrain_meshes').glob('*.npz'))) == 2
+
+
+@responses.activate
+def test_detail_settings_reach_pipeline_and_invalidate_cached_terrain(tmp_path, monkeypatch):
+    _add_terrain_mock()
+    _add_biomes_mock()
+    calls = {}
+    for name in ('fetch_heightmap', 'fetch_water_polygons', 'build_land_mesh', 'build_route_mesh', 'smooth_heightmap'):
+        original = getattr(pipeline_module, name)
+        def capture(*args, _name=name, _original=original, **kwargs):
+            calls.setdefault(_name, []).append(kwargs.copy())
+            return _original(*args, **kwargs)
+        monkeypatch.setattr(pipeline_module, name, capture)
+    detail = dict(forceSourceZoom=True, maxZoom=14, waterZoom=13, sampleMm=.2,
+                  toleranceMm=.02, smoothingSigma=1, smoothingMaxMm=.01,
+                  maxVertices=10000, maxReferencePoints=100000, maxPasses=10,
+                  maxTiles=100, maxRoutePoints=5000)
+    settings = _settings(terrain={'detail': detail})
+    deps = _deps(tmp_path)
+    build_kit(settings, _route(), deps)
+    build_kit(settings, _route(), deps)
+    assert len(calls['build_land_mesh']) == 1
+    assert calls['fetch_heightmap'][0]['max_zoom'] == 14
+    assert calls['fetch_heightmap'][0]['maximum_source_detail'] is True
+    assert calls['fetch_water_polygons'][0]['zoom'] == 13
+    assert calls['build_land_mesh'][0]['max_vertices'] == 10000
+    assert calls['build_land_mesh'][0]['max_reference_points'] == 100000
+    assert calls['build_land_mesh'][0]['max_passes'] == 10
+    assert calls['build_route_mesh'][0]['max_points'] == 5000
+    assert calls['smooth_heightmap'][0]['sigma'] == 1
+    settings.terrain.detail.smoothing_max_mm = .02
+    build_kit(settings, _route(), deps)
+    assert len(calls['build_land_mesh']) == 2

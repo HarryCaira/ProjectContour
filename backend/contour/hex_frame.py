@@ -20,14 +20,11 @@ class HexFrame:
     """A pointy-top regular hexagon anchored at a geodetic point.
 
     All downstream geometry is computed in a LocalENU anchored on the hex centre.
-    rotation_degrees ∈ [0, 60) rotates the hex around its centre; rotation beyond 60°
-    is redundant because of hex symmetry.
     """
 
     centre_lon: float
     centre_lat: float
     circumradius_m: float
-    rotation_degrees: float = 0.0
 
     @property
     def apothem_m(self) -> float:
@@ -40,8 +37,7 @@ class HexFrame:
 
     def vertices_enu(self) -> NDArray[np.float64]:
         """6 vertices in ENU (relative to the hex centre), CCW starting from the top vertex."""
-        rot_rad = math.radians(self.rotation_degrees)
-        angles = _FIRST_VERTEX_ANGLE_RAD + rot_rad + np.arange(6) * (math.pi / 3)
+        angles = _FIRST_VERTEX_ANGLE_RAD + np.arange(6) * (math.pi / 3)
         return np.stack([self.circumradius_m * np.cos(angles), self.circumradius_m * np.sin(angles)], axis=-1)
 
     def polygon_enu(self) -> Polygon:
@@ -52,13 +48,12 @@ class HexFrame:
 def hex_frame_for_route(
     route: Route,
     padding_ratio: float = 0.15,
-    rotation_degrees: float = 0.0,
 ) -> HexFrame:
     """Compute the smallest hex containing the route, with the given proportional padding.
 
     The hex is centred on the route's geographic bbox centroid. Its size is set so the
     inscribed circle (radius = apothem) contains every route point plus the requested
-    padding — guaranteeing the route fits regardless of hex rotation.
+    padding — guaranteeing the route fits within the frame.
     """
     centre_lon, centre_lat = route.centroid
     enu = LocalENU(lat0=centre_lat, lon0=centre_lon)
@@ -74,5 +69,4 @@ def hex_frame_for_route(
         centre_lon=centre_lon,
         centre_lat=centre_lat,
         circumradius_m=circumradius_m,
-        rotation_degrees=rotation_degrees,
     )
