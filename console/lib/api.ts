@@ -24,7 +24,12 @@ export interface MeshResult {
 export async function uploadGpx(file: File): Promise<UploadResponse> {
   const form = new FormData();
   form.append("file", file);
-  const r = await fetch(`${BASE}/upload`, { method: "POST", body: form });
+  let r: Response;
+  try {
+    r = await fetch(`${BASE}/upload`, { method: "POST", body: form });
+  } catch {
+    throw new Error("Couldn't connect to the upload service. Please try again shortly.");
+  }
   if (!r.ok) throw await asError(r);
   return r.json();
 }

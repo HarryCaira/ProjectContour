@@ -52,21 +52,38 @@ def shoreline_sampler(
         # Spread larger adjustments over a wider bank instead of excavating a
         # narrow rim. Median lake levels keep both lowering and raising modest.
         widths.append(max(minimum_width, float(delta.max()) * 4))
-    tree = shapely.STRtree([polygon.boundary for polygon in polygons])
+    # Index short coastline sections: a single ocean polygon can contain
+    # hundreds of thousands of edges, making whole-boundary queries quadratic.
+    sections, owners = [], []
+    for index, polygon in enumerate(polygons):
+        for ring in (polygon.exterior, *polygon.interiors):
+            coords = np.asarray(ring.coords)
+            for start in range(0, len(coords) - 1, 64):
+                sections.append(shapely.LineString(coords[start:start + 65]))
+                owners.append(index)
+    owners = np.asarray(owners, dtype=np.int64)
+    tree = shapely.STRtree(sections)
 
     def sample_surface(points: np.ndarray) -> np.ndarray:
         elevations = sample(points)
         if not polygons or not len(points):
             return elevations
         point_geometries = shapely.points(points)
-        point_ids, polygon_ids = tree.query(point_geometries, predicate="dwithin", distance=max(widths))
+        point_ids, section_ids = tree.query(point_geometries, predicate="dwithin", distance=max(widths))
+        distances = shapely.distance(point_geometries[point_ids], tree.geometries[section_ids])
+        # Preserve the exact nearest distance for each point/water-body pair.
+        keys = point_ids * len(polygons) + owners[section_ids]
+        order = np.argsort(keys)
+        keys, starts = np.unique(keys[order], return_index=True)
+        distances = np.minimum.reduceat(distances[order], starts)
+        point_ids, polygon_ids = keys // len(polygons), keys % len(polygons)
         weight_sum = np.zeros(len(points))
         correction_sum = np.zeros(len(points))
         strongest = np.zeros(len(points))
         boundary_level = np.full(len(points), np.nan)
         for index in np.unique(polygon_ids):
             ids = point_ids[polygon_ids == index]
-            distance = shapely.distance(point_geometries[ids], polygons[index].boundary)
+            distance = distances[polygon_ids == index]
             t = np.clip(distance / widths[index], 0, 1)
             weight = 1 - t*t*(3 - 2*t)
             influence = weight / np.maximum(t, 1e-9)**2

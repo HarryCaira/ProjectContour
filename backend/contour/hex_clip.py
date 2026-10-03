@@ -62,7 +62,7 @@ def triangulate_land(
     # Recursive calls no longer carry the water polygons, so cleaning only
     # those calls with water leaves near-zero island edges in the triangulation.
     if water_polygons:
-        land = shapely.set_precision(land, grid_size=spacing * 1e-8)
+        land = shapely.set_precision(land, grid_size=min(spacing * 1e-8, 1e-6))
     if isinstance(land, MultiPolygon):
         pieces = [triangulate_land(poly, [], grid_points_per_side, interior_points) for poly in land.geoms]
         vertices, triangles, segments = [], [], []
@@ -120,9 +120,15 @@ def triangulate_land(
 
     all_vertices = np.concatenate((np.asarray(boundary_vertices, dtype=np.float64), interior_grid))
 
+    # Coastlines can meet at a shared coordinate. Triangle requires a single
+    # vertex index at each junction, including vertices shared by hole rings.
+    all_vertices, inverse = np.unique(all_vertices, axis=0, return_inverse=True)
+    segments = inverse[np.asarray(boundary_segments, dtype=np.int32)]
+    segments = segments[segments[:, 0] != segments[:, 1]]
+    segments = np.unique(np.sort(segments, axis=1), axis=0)
     triangulation_input: dict = {
         "vertices": all_vertices,
-        "segments": np.array(boundary_segments, dtype=np.int32),
+        "segments": segments,
     }
     if hole_points:
         triangulation_input["holes"] = np.array(hole_points, dtype=np.float64)
@@ -148,11 +154,7 @@ def _interior_grid_points(
     grid_x, grid_y = np.meshgrid(xs, ys)
     points = np.column_stack([grid_x.ravel(), grid_y.ravel()])
 
-    # Shrink the land polygon by `inset` so interior grid points stay well clear
-    # of the boundary segments (otherwise CDT can produce sliver triangles).
-    shrunken = land.buffer(-inset)
-    if shrunken.is_empty:
-        return np.empty((0, 2))
-
-    mask = shapely.contains_xy(shrunken, points[:, 0], points[:, 1])
-    return points[mask]
+    # Distance filtering is equivalent to an inset for these candidate points,
+    # without buffering an entire country-sized coastline for a small seed grid.
+    points = points[shapely.contains_xy(land, points[:, 0], points[:, 1])]
+    return points[shapely.distance(shapely.points(points), land.boundary) > inset]

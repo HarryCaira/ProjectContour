@@ -2,13 +2,38 @@ import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.j
 import type { ModelColours } from "./settings";
 import { Box3, Group, Mesh, MeshStandardMaterial, Matrix3, Vector3 } from "three";
 
+/** Give flush road interfaces stable depth ordering without moving print geometry. */
+export function prepareRoadRendering(scene: Group): void {
+  scene.traverse((object) => {
+    if (!(object instanceof Mesh) || object.name !== "roads") return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    const roadMaterials = materials.map((material) => {
+      const roadMaterial = material.clone();
+      roadMaterial.polygonOffset = true;
+      roadMaterial.polygonOffsetFactor = -1;
+      roadMaterial.polygonOffsetUnits = -1;
+      return roadMaterial;
+    });
+    object.material = Array.isArray(object.material) ? roadMaterials : roadMaterials[0];
+  });
+}
+
 /** Smooth terrain lighting while retaining sharp cut walls and plinth edges.
  * This affects the preview normals only; printable vertex positions stay intact.
  */
 export function prepareTerrainShading(scene: Group): void {
   scene.traverse((object) => {
     if (!(object instanceof Mesh) || object.name !== "land") return;
-    object.geometry = toCreasedNormals(object.geometry, Math.PI / 4);
+    const original = object.geometry;
+    const faces = (original.index?.count ?? original.attributes.position.count) / 3;
+    if (faces > 250_000) {
+      // Keep shared vertices on large previews; crease expansion creates huge
+      // JS object maps and multiplies CPU/GPU geometry memory.
+      original.computeVertexNormals();
+    } else {
+      object.geometry = toCreasedNormals(original, Math.PI / 4);
+      if (object.geometry !== original) original.dispose();
+    }
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     for (const material of materials) {
       if (material instanceof MeshStandardMaterial) {
@@ -24,6 +49,7 @@ interface RouteVertices {
   original: Float32Array;
   base: Float32Array;
   offsets?: Float32Array;
+  building?: boolean;
 }
 const routeTransforms = new WeakMap<Group, { pivot: number; routes: RouteVertices[] }>();
 
@@ -46,11 +72,12 @@ export function normaliseKit(scene: Group): Group {
   const route = scene.getObjectByName("route");
   const meshes: Mesh[] = [];
   route?.traverse((object) => { if (object instanceof Mesh) meshes.push(object); });
+  scene.getObjectByName("buildings")?.traverse((object) => { if (object instanceof Mesh) meshes.push(object); });
   for (const mesh of meshes) {
     // Work in the same coordinate frame as the terrain pivot, preserving the
     // original geometry so repeated slider changes never accumulate distortion.
     const offsetMatrix = new Matrix3().setFromMatrix4(mesh.matrixWorld);
-    mesh.geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+    mesh.geometry.applyMatrix4(mesh.matrixWorld);
     const offsetAttribute = mesh.geometry.getAttribute("_route_offset");
     let offsets: Float32Array | undefined;
     if (offsetAttribute) {
@@ -78,7 +105,7 @@ export function normaliseKit(scene: Group): Group {
     for (let i = 0; i < positions.count; i++) {
       base[i] = bases.get(`${original[i * 3]},${original[i * 3 + 1]}`)!;
     }
-    routes.push({ mesh, original, base, offsets });
+    routes.push({ mesh, original, base, offsets, building: mesh.name === "buildings" });
   }
 
   const terrainOffset = new Group();
@@ -107,7 +134,7 @@ export function setKitExaggeration(root: Group, exaggeration: number, widthScale
   relief.scale.z = exaggeration;
   const transform = routeTransforms.get(root);
   if (transform) {
-    for (const { mesh, original, base, offsets } of transform.routes) {
+    for (const { mesh, original, base, offsets, building } of transform.routes) {
       const positions = mesh.geometry.attributes.position;
       for (let i = 0; i < positions.count; i++) {
         const raisedHeight = offsets?.[i * 3 + 2] ?? original[i * 3 + 2] - base[i];
@@ -116,7 +143,7 @@ export function setKitExaggeration(root: Group, exaggeration: number, widthScale
           positions.setX(i, original[i * 3] + offsets[i * 3] * (widthScale - 1));
           positions.setY(i, original[i * 3 + 1] + offsets[i * 3 + 1] * (widthScale - 1));
         }
-        positions.setZ(i, transform.pivot + (terrainZ - transform.pivot) * exaggeration + raisedHeight * heightScale);
+        positions.setZ(i, transform.pivot + (terrainZ - transform.pivot) * exaggeration + raisedHeight * (building ? 1 : heightScale));
       }
       positions.needsUpdate = true;
       mesh.geometry.computeVertexNormals();
@@ -135,7 +162,7 @@ export function measureKit(root: Group, physicalSizeMm: number): { bounds: Box3;
 
 /** Change surface colours without rebuilding or modifying geometry. */
 export function setKitColours(root: Group, colours: ModelColours): void {
-  const parts = { land: colours.terrain, water: colours.water, route: colours.route };
+  const parts = { land: colours.terrain, water: colours.water, route: colours.route, roads: colours.roads, buildings: colours.buildings };
   root.traverse((object) => {
     if (!(object instanceof Mesh)) return;
     const colour = parts[object.name as keyof typeof parts];
@@ -144,5 +171,16 @@ export function setKitColours(root: Group, colours: ModelColours): void {
     for (const material of materials) {
       if (material instanceof MeshStandardMaterial) material.color.set(colour);
     }
+  });
+}
+
+/** Release GPU buffers and BVH references when replacing a loaded preview. */
+export function disposeKit(root: Group): void {
+  root.traverse((object) => {
+    if (!(object instanceof Mesh)) return;
+    object.geometry.disposeBoundsTree?.();
+    object.geometry.dispose();
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) material.dispose();
   });
 }

@@ -132,3 +132,11 @@ def test_multiple_segments_have_separate_caps_and_keep_resize_attributes():
         build_route_mesh(route, HexFrame(centre_lon=0, centre_lat=0, circumradius_m=200),
                          _flat_heightmap(), width_m=2, height_above_terrain_m=1,
                          surface_tolerance_m=.01, sample_spacing_m=10, max_points=10)
+
+
+def test_dense_recording_does_not_exhaust_route_budget():
+    mesh = build_route_mesh(_straight_route(num_points=10000),
+        HexFrame(centre_lon=0, centre_lat=0, circumradius_m=200), _flat_heightmap(),
+        width_m=5, height_above_terrain_m=2, surface_tolerance_m=.1,
+        sample_spacing_m=2, max_points=100)
+    assert mesh is not None and mesh.is_volume

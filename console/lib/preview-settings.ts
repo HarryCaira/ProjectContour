@@ -4,6 +4,7 @@ import { DEFAULT_COLOURS, type Settings } from "./settings.ts";
 export function previewSettings(settings: Settings): Settings {
   return {
     ...settings,
+    biomes: { ...settings.biomes, woodland: { enabled: false }, rock: { enabled: false }, snow: { enabled: false, snowline: .72 } },
     physical: { ...settings.physical, resolutionMm: 0.1 },
     style: { ...settings.style, colours: DEFAULT_COLOURS },
     terrain: { ...settings.terrain, maximumSourceDetail: settings.terrain.maximumSourceDetail ?? false, verticalExaggeration: 1 },

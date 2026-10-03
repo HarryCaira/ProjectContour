@@ -18,7 +18,7 @@ def test_mask_preserves_holes_and_axis_orientation():
     rock = box(6, 0, 10, 4)
     result = coverage.coverage_preview({'wood': wood, 'rock': rock}, domain, 101)
     pixels = np.asarray(Image.open(io.BytesIO(base64.b64decode(result['image'].split(',')[1]))))
-    assert tuple(pixels[10, 10]) == (255, 0, 0)
+    assert tuple(pixels[10, 10]) == (255, 0, 255)
     assert tuple(pixels[35, 15]) == (0, 0, 0)  # hole
     assert tuple(pixels[90, 90]) == (0, 255, 0)
     assert tuple(pixels[10, 90]) == (0, 0, 0)  # unknown stays ordinary terrain
@@ -43,3 +43,10 @@ def test_fetch_reads_only_mapped_classes_and_resolves_overlaps(monkeypatch, tmp_
     area = frame.polygon_enu().area
     assert result['percentages']['wood'] == round(100*wood.difference(rock.union(water)).area/area,2)
     assert result['percentages']['rock'] == round(100*rock.difference(water).area/area,2)
+
+
+def test_woodland_edge_distance_increases_towards_interior():
+    result = coverage.coverage_preview({'wood': box(2,2,8,8), 'rock': Polygon()}, box(0,0,10,10), 1001)
+    pixels = np.asarray(Image.open(io.BytesIO(base64.b64decode(result['image'].split(',')[1]))))
+    assert pixels[500,190,2] == 0
+    assert 0 < pixels[500,201,2] < pixels[500,210,2] < pixels[500,230,2] == 255

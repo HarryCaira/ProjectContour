@@ -20,12 +20,17 @@ export const PhysicalSchema = z.object({
   resolutionMm: z.number().positive().default(0.2),
 });
 
-export const DEFAULT_COLOURS = { terrain: "#7a8060", water: "#6a8aa0", route: "#c44545" };
+export const DEFAULT_COLOURS = { roads: "#555454", buildings: "#c5b6a2", snow: "#f3f4ef", terrain: "#7a8060", water: "#6a8aa0", route: "#c44545", woodland: "#365d38", rock: "#96928a" };
 const hexColour = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 export const ColoursSchema = z.object({
+  roads: hexColour.default(DEFAULT_COLOURS.roads),
+  buildings: hexColour.default(DEFAULT_COLOURS.buildings),
+  snow: hexColour.default(DEFAULT_COLOURS.snow),
   terrain: hexColour.default(DEFAULT_COLOURS.terrain),
   water: hexColour.default(DEFAULT_COLOURS.water),
   route: hexColour.default(DEFAULT_COLOURS.route),
+  woodland: hexColour.default(DEFAULT_COLOURS.woodland),
+  rock: hexColour.default(DEFAULT_COLOURS.rock),
 });
 export type ModelColours = z.infer<typeof ColoursSchema>;
 
@@ -65,6 +70,11 @@ export const WaterBiomeSchema = z.object({
 });
 
 export const BiomesSchema = z.object({
+  roads: z.object({ enabled: z.boolean().default(true) }).default({}),
+  buildings: z.object({ enabled: z.boolean().default(true) }).default({}),
+  snow: z.object({ enabled: z.boolean().default(false), snowline: z.number().min(0).max(1).default(0.72) }).default({}),
+  rock: z.object({ enabled: z.boolean().default(true) }).default({}),
+  woodland: z.object({ enabled: z.boolean().default(true) }).default({}),
   water: WaterBiomeSchema.default({}),
 });
 

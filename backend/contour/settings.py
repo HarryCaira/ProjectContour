@@ -27,6 +27,11 @@ class Physical(BaseModel):
 
 
 class ModelColours(BaseModel):
+    roads: str = Field("#555454", pattern=r"^#[0-9a-fA-F]{6}$")
+    buildings: str = Field("#c5b6a2", pattern=r"^#[0-9a-fA-F]{6}$")
+    snow: str = Field("#f3f4ef", pattern=r"^#[0-9a-fA-F]{6}$")
+    woodland: str = Field("#365d38", pattern=r"^#[0-9a-fA-F]{6}$")
+    rock: str = Field("#96928a", pattern=r"^#[0-9a-fA-F]{6}$")
     terrain: str = Field("#7a8060", pattern=r"^#[0-9a-fA-F]{6}$")
     water: str = Field("#6a8aa0", pattern=r"^#[0-9a-fA-F]{6}$")
     route: str = Field("#c44545", pattern=r"^#[0-9a-fA-F]{6}$")
@@ -72,7 +77,25 @@ class WaterBiome(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class WoodlandBiome(BaseModel):
+    enabled: bool = False
+
+
+class RockBiome(BaseModel):
+    enabled: bool = False
+
+
+class SnowBiome(BaseModel):
+    enabled: bool = False
+    snowline: float = Field(0.72, ge=0, le=1)
+
+
 class Biomes(BaseModel):
+    roads: RockBiome = Field(default_factory=lambda: RockBiome(enabled=True))
+    buildings: RockBiome = Field(default_factory=lambda: RockBiome(enabled=True))
+    snow: SnowBiome = Field(default_factory=SnowBiome)
+    rock: RockBiome = Field(default_factory=RockBiome)
+    woodland: WoodlandBiome = Field(default_factory=WoodlandBiome)
     water: WaterBiome = Field(default_factory=WaterBiome)
 
 

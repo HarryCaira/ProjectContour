@@ -73,6 +73,9 @@ def build_route_mesh(
     if surface_tolerance_m is not None:
         if sample_spacing_m is None or sample_spacing_m <= 0 or surface_tolerance_m <= 0:
             raise ValueError("Route detail requires positive spacing and tolerance")
+        # Dense GPX recordings should not spend the entire mesh budget on
+        # redundant input points. Bound horizontal error below surface tolerance.
+        pts_2d = pts_2d[simplify_route(pts_2d, min(surface_tolerance_m, sample_spacing_m * .1))]
         pts_2d = resample_route(pts_2d, sample_spacing_m, max_points=max_points)
     elif len(pts_2d) > max_segments:
         idx = np.linspace(0, len(pts_2d) - 1, max_segments + 1).astype(int)

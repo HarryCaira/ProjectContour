@@ -5,6 +5,7 @@ import io
 import math
 from concurrent.futures import ThreadPoolExecutor
 
+from requests import HTTPError
 import numpy as np
 from PIL import Image
 
@@ -156,7 +157,22 @@ def _fetch_tile_with_cache(
     if cached is not None:
         return cached
     url = f"{BASE_URL}/{tile.zoom}/{tile.x}/{tile.y}.pngraw"
-    data = client.get(url, params={"access_token": token})
+    try:
+        data = client.get(url, params={"access_token": token})
+    except HTTPError as error:
+        response = error.response
+        # Terrain-RGB omits all-ocean tiles. Do not mask auth/provider errors.
+        if response is None or response.status_code != 404:
+            raise
+        try:
+            missing_ocean = response.json().get("message") in {"Tile does not exist", "Tile not found"}
+        except (ValueError, AttributeError):
+            missing_ocean = False
+        if not missing_ocean:
+            raise
+        png = io.BytesIO()
+        Image.new("RGB", (256, 256), (1, 134, 160)).save(png, format="PNG")
+        data = png.getvalue()
     cache.set(PROVIDER, LAYER, tile.zoom, tile.x, tile.y, "png", data)
     return data
 

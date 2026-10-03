@@ -9,9 +9,10 @@ export function UploadButton() {
   const upload = useUploadGpx();
   const setSource = useEditorStore((s) => s.setSource);
 
-  const onPick = async (file: File) => {
-    const res = await upload.mutateAsync(file);
-    setSource({ type: "gpx", id: res.id, sha256: res.sha256 });
+  const onPick = (file: File) => {
+    upload.mutate(file, {
+      onSuccess: (res) => setSource({ type: "gpx", id: res.id, sha256: res.sha256 }),
+    });
   };
 
   return (
@@ -23,6 +24,7 @@ export function UploadButton() {
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
+          e.target.value = "";
           if (f) onPick(f);
         }}
       />

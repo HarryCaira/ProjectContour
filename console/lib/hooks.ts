@@ -22,7 +22,8 @@ export function useUploadGpx() {
  */
 export function useMesh(settings: Settings | null) {
   const preview = settings ? previewSettings(settings) : null;
-  const geometryKey = preview ? JSON.stringify({ ...preview, physical: { ...preview.physical, sizeMm: 0 } }) : null;
+  const physicalFeatures = preview?.biomes.roads?.enabled || preview?.biomes.buildings?.enabled;
+  const geometryKey = preview ? JSON.stringify({ ...preview, physical: { ...preview.physical, sizeMm: physicalFeatures ? preview.physical.sizeMm : 0 } }) : null;
   const [detail, setDetail] = useState<{ geometryKey: string | null; size: number }>({ geometryKey: null, size: 0 });
   const size = preview ? Math.max(preview.physical.sizeMm, detail.geometryKey === geometryKey ? detail.size : 0) : 0;
   const desiredKey = preview ? JSON.stringify({ ...preview, physical: { ...preview.physical, sizeMm: size } }) : null;
@@ -38,7 +39,7 @@ export function useMesh(settings: Settings | null) {
   }, [desiredKey, geometryKey, size]);
   const [progress, setProgress] = useState<(MeshProgress & { key: string | null }) | null>(null);
   const query = useQuery({
-    queryKey: ["mesh-interactive-v9", key],
+    queryKey: ["mesh-interactive-v11", key],
     queryFn: async ({ signal }) => {
       const requested = JSON.parse(key!) as Settings;
       setProgress({ key, stage: "starting" });
@@ -51,7 +52,7 @@ export function useMesh(settings: Settings | null) {
     placeholderData: keepPreviousData,
     enabled: !!settings && !!key,
     staleTime: Infinity,
-    gcTime: 1000 * 60 * 30,
+    gcTime: 0,
   });
   return { ...query, matchesCoverage: query.data?.coverageKey === JSON.stringify([settings?.source, settings?.framing]), progress: progress?.key === key ? progress : null };
 }

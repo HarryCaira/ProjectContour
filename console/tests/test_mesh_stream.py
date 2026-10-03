@@ -10,8 +10,9 @@ def console_dir() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize("protocol", ["legacy", "chunked"])
 @pytest.mark.parametrize("chunk_size", [1, 13, 4096])
-def test__read_mesh_stream__handles_chunk_boundaries(console_dir: Path, chunk_size: int) -> None:
+def test__read_mesh_stream__handles_chunk_boundaries(console_dir: Path, chunk_size: int, protocol: str) -> None:
     script = """
 import assert from 'node:assert/strict';
 import { readMeshStream } from './lib/mesh-stream.ts';
@@ -22,6 +23,12 @@ const events = [
   {type: 'progress', stage: 'preview'},
   {type: 'result', glb: btoa('glTF'), metadata: {parts: ['land'], triangles: [12]}},
 ];
+if (process.argv[2] === 'chunked') {
+  events.pop();
+  events.push({type:'mesh_start',bytes:4},
+    {type:'mesh_chunk',data:btoa('gl')}, {type:'mesh_chunk',data:btoa('TF')},
+    {type:'result',metadata:{parts:['land'],triangles:[12]}});
+}
 const bytes = new TextEncoder().encode(events.map(e => JSON.stringify(e)).join('\\n'));
 const stream = new ReadableStream({ start(controller) {
   for (let i = 0; i < bytes.length; i += size) controller.enqueue(bytes.slice(i, i + size));
@@ -33,7 +40,7 @@ assert.deepEqual(stages, ['terrain', 'preview', 'display']);
 assert.equal(new TextDecoder().decode(result.glb), 'glTF');
 assert.deepEqual(result.metadata, {parts: ['land'], triangles: [12]});
 """
-    subprocess.run(["node", "--experimental-strip-types", "--input-type=module", "-e", script, str(chunk_size)],
+    subprocess.run(["node", "--experimental-strip-types", "--input-type=module", "-e", script, str(chunk_size), protocol],
                    cwd=console_dir, check=True, capture_output=True, text=True)
 
 
@@ -55,3 +62,25 @@ assert.equal(stream.locked, false);
 """
     subprocess.run(["node", "--experimental-strip-types", "--input-type=module", "-e", script, mode],
                    cwd=console_dir, check=True, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize('events', [
+    [{'type':'mesh_start','bytes':4},{'type':'mesh_chunk','data':'Z2w='},{'type':'result'}],
+    [{'type':'mesh_start','bytes':1},{'type':'mesh_chunk','data':'Z2w='}],
+    [{'type':'mesh_chunk','data':'Z2w='}],
+    [{'type':'mesh_start','bytes':4},{'type':'mesh_start','bytes':4}],
+    [{'type':'mesh_start','bytes':300_000_000}],
+])
+def test_chunked_mesh_rejects_incomplete_or_oversized_data(console_dir, events):
+    import json
+    script="""
+import assert from 'node:assert/strict';
+import {readMeshStream} from './lib/mesh-stream.ts';
+const events=JSON.parse(process.argv[1]);
+const body=new ReadableStream({start(c){
+ c.enqueue(new TextEncoder().encode(events.map(e=>JSON.stringify(e)).join('\\n')));c.close();
+}});
+await assert.rejects(()=>readMeshStream(body,()=>{}));
+assert.equal(body.locked,false);
+"""
+    subprocess.run(['node','--experimental-strip-types','--input-type=module','-e',script,json.dumps(events)],cwd=console_dir,check=True,capture_output=True,text=True)

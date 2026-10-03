@@ -6,7 +6,7 @@ from typing import Literal
 
 import trimesh
 
-PartName = Literal["land", "water", "route", "plinth"]
+PartName = Literal["land", "water", "route", "plinth", "woodland", "rock", "snow", "roads", "buildings"]
 
 
 @dataclass
