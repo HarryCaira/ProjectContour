@@ -21,9 +21,9 @@ export function Scene() {
   const [viewerError, setViewerError] = useState<Error | null>(null);
   const settings = useEditorStore((s) => s.settings);
   const meshQuery = useMesh(settings);
-  const showLandCover = useEditorStore(s => s.showLandCover);
+  const showLandCover = !!settings && (settings.biomes.woodland.enabled || settings.biomes.rock.enabled);
   const coverQuery = useQuery({
-    queryKey: ["landcover", settings?.source, settings?.framing],
+    queryKey: ["landcover-edge-v3", settings?.source, settings?.framing],
     queryFn: ({ signal }) => fetchLandCover(settings!, signal),
     enabled: !!settings && showLandCover,
     staleTime: Infinity, retry: false,
@@ -31,7 +31,7 @@ export function Scene() {
 
   return (
     <div className="relative h-full w-full bg-canvas">
-      <Canvas camera={{ position: [5, 5, 5], up: [0, 0, 1], fov: 35 }} shadows>
+      <Canvas camera={{ position: [5, 5, 5], up: [0, 0, 1], fov: 35, near: 0.1, far: 100 }} shadows>
         <color attach="background" args={["#f5f3ee"]} />
         <ambientLight intensity={0.4} />
         <directionalLight
@@ -45,6 +45,8 @@ export function Scene() {
           <KitMesh
             key={meshQuery.dataUpdatedAt}
             glb={meshQuery.data.glb}
+            snow={settings?.biomes.snow}
+            coverEnabled={{ woodland: settings?.biomes.woodland.enabled ?? false, rock: settings?.biomes.rock.enabled ?? false }}
             modelRef={modelRef}
             landCover={showLandCover && meshQuery.matchesCoverage ? coverQuery.data : undefined}
             meshSizeMm={meshQuery.data.physicalSizeMm ?? 100}
@@ -95,10 +97,9 @@ export function Scene() {
           Rebuild preview
         </button>
       )}
-      {settings && showLandCover && (
+      {settings && showLandCover && (coverQuery.isPending || coverQuery.isError) && (
         <div className="absolute bottom-12 left-5 max-w-sm rounded-md bg-canvas/90 px-3 py-2 text-xs text-muted">
-          {coverQuery.isPending ? "Mapping woodland and rock…" : coverQuery.isError ? "Land cover unavailable. Terrain remains visible." :
-            `Mapped woodland ${coverQuery.data.percentages.wood}% · rock ${coverQuery.data.percentages.rock}%`}
+          {coverQuery.isPending ? "Mapping woodland and rock…" : "Land cover unavailable. Terrain remains visible."}
         </div>
       )}
       {meshQuery.isFetching && meshQuery.data && (

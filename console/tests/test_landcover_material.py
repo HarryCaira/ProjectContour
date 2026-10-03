@@ -6,7 +6,7 @@ import subprocess
 def test_coverage_material_and_cleanup():
     script = '''
 import assert from 'node:assert/strict';
-import { Group, Mesh, BoxGeometry, MeshStandardMaterial, Texture } from 'three';
+import { Color, Group, Mesh, BoxGeometry, MeshStandardMaterial, Texture } from 'three';
 import { applyLandCover } from './lib/landcover-material.ts';
 const root = new Group();
 const land = new Mesh(new BoxGeometry(),new MeshStandardMaterial()); land.name='land'; root.add(land);
@@ -15,13 +15,18 @@ const original = land.material.onBeforeCompile;
 const key = land.material.customProgramCacheKey;
 const waterOriginal = water.material.onBeforeCompile;
 const positions = Array.from(land.geometry.attributes.position.array);
-const restore = applyLandCover(root,new Texture(),[-100,-200,100,200],100);
+const colours = { woodland: new Color("#112233"), rock: new Color("#abcdef") };
+const restore = applyLandCover(root,new Texture(),[-100,-200,100,200],100,colours);
 const firstOverlayKey = land.material.customProgramCacheKey();
 const shader = {uniforms:{}, vertexShader:'#include <begin_vertex>',fragmentShader:'#include <color_fragment>'};
 land.material.onBeforeCompile(shader,{});
 assert.deepEqual(shader.uniforms.coverageBounds.value.toArray(),[-25,-50,50,100]);
 assert.ok(shader.vertexShader.includes('normal.z'));
 assert.ok(shader.fragmentShader.includes('woodColour'));
+assert.equal(shader.uniforms.woodColour.value.getHexString(), '112233');
+assert.equal(shader.uniforms.rockColour.value.getHexString(), 'abcdef');
+colours.woodland.set('#fedcba');
+assert.equal(shader.uniforms.woodColour.value.getHexString(), 'fedcba');
 assert.equal(water.material.onBeforeCompile,waterOriginal);
 restore();
 assert.equal(land.material.onBeforeCompile,original);

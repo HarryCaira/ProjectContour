@@ -10,6 +10,7 @@ from threading import Event
 
 from contour.errors import ContourError
 from contour.gltf_export import to_glb
+from contour.preview_mesh import display_kit
 from contour.pipeline import PipelineDependencies, build_kit
 from contour.route import Route
 from contour.settings import Settings
@@ -38,9 +39,10 @@ async def stream_mesh(settings: Settings, route: Route, deps: PipelineDependenci
         try:
             kit = build_kit(settings, route, deps, on_progress=progress)
             progress("preview")
+            kit = display_kit(kit)
             glb = to_glb(kit)
             send({
-                "type": "result", "glb": base64.b64encode(glb).decode("ascii"),
+                "type": "result", "binary": glb,
                 "metadata": {
                     "parts": [part.name for part in kit.parts],
                     "triangles": [len(part.mesh.faces) for part in kit.parts],
@@ -63,6 +65,11 @@ async def stream_mesh(settings: Settings, route: Route, deps: PipelineDependenci
             except TimeoutError:
                 yield json.dumps({"type": "heartbeat"}) + "\n"
                 continue
+            if event.get("type") == "result":
+                binary = event.pop("binary")
+                yield json.dumps({"type": "mesh_start", "bytes": len(binary)}) + "\n"
+                for offset in range(0, len(binary), 192 * 1024):
+                    yield json.dumps({"type": "mesh_chunk", "data": base64.b64encode(binary[offset:offset + 192 * 1024]).decode("ascii")}) + "\n"
             yield json.dumps(event) + "\n"
             if event["type"] in {"result", "error"}:
                 break

@@ -10,7 +10,7 @@ from shapely.geometry import Polygon, shape
 from shapely.ops import unary_union
 
 from contour.hex_frame import HexFrame
-from contour.tiles import RasterTile, tiles_covering_bbox
+from contour.tiles import RasterTile, tiles_covering_bbox, lonlat_to_tile
 from contour.coordinates import LocalENU
 from contour.tile_cache import TileCache
 from contour.http_client import HttpClient
@@ -19,6 +19,16 @@ PROVIDER = "mapbox"
 LAYER = "streets-v8"
 BASE_URL = "https://api.mapbox.com/v4/mapbox.mapbox-streets-v8"
 DEFAULT_ZOOM = 14
+
+
+def vector_zoom(frame: HexFrame, requested: int = DEFAULT_ZOOM, max_tiles: int = 256) -> int:
+    """Keep regional models bounded; retain requested detail on local models."""
+    west, south, east, north = _hex_geographic_bbox(frame)
+    for zoom in range(requested, -1, -1):
+        nw, se = lonlat_to_tile(west, north, zoom), lonlat_to_tile(east, south, zoom)
+        if (abs(se.x - nw.x) + 1) * (abs(se.y - nw.y) + 1) <= max_tiles:
+            return zoom
+    return 0
 
 
 def fetch_water_polygons(
@@ -33,6 +43,7 @@ def fetch_water_polygons(
     Returns a list of Polygons in ENU coordinates anchored on the hex centre.
     """
     west, south, east, north = _hex_geographic_bbox(hex_frame)
+    zoom = vector_zoom(hex_frame, zoom)
     tiles = tiles_covering_bbox(west, south, east, north, zoom)
 
     enu = hex_frame.local_enu()
@@ -46,6 +57,11 @@ def fetch_water_polygons(
     if not polygons_enu:
         return []
 
+    if zoom < DEFAULT_ZOOM:
+        # Discard sub-visible coastline noise before expensive contact repair.
+        # At 100 mm this is at most 0.001 mm of horizontal displacement.
+        tolerance = 2 * hex_frame.circumradius_m * 1e-5
+        polygons_enu = [p.simplify(tolerance, preserve_topology=True) for p in polygons_enu]
     merged = _join_water_contacts(polygons_enu)
     clipped = merged.intersection(hex_polygon)
     return _flatten_polygons(clipped)
@@ -59,12 +75,25 @@ def _join_water_contacts(polygons: list[Polygon]):
     """
     merged = unary_union(polygons)
     pieces = _flatten_polygons(merged)
-    if len(pieces) < 2:
+    # Include pinches within one polygon (e.g. an island touching its coastline),
+    # not just contacts between different polygons. Ring-closing points are not
+    # contacts and must not be counted twice.
+    rings = [np.asarray(ring.coords)[:-1, :2] for piece in pieces
+             for ring in (piece.exterior, *piece.interiors)]
+    if not rings:
         return merged
-    left, right = shapely.STRtree(pieces).query(pieces, predicate="intersects")
-    if not np.any(left != right):
+    # Node linework first: a hole may meet the middle of an exterior edge,
+    # where the exterior has no explicit vertex yet.
+    linework = shapely.node(shapely.MultiLineString([
+        np.vstack([ring, ring[0]]) for ring in rings]))
+    lines = shapely.get_parts(linework)
+    endpoints = np.concatenate([np.asarray(line.coords)[[0, -1], :2] for line in lines])
+    coordinates, counts = np.unique(endpoints, axis=0, return_counts=True)
+    contacts = coordinates[counts > 2]
+    if not len(contacts):
         return merged
-    return merged.buffer(0.01).buffer(-0.01)
+    patches = shapely.buffer(shapely.points(contacts), 0.01)
+    return unary_union([merged, *patches])
 
 
 def extract_water_polygons_enu(

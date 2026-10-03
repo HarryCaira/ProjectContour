@@ -101,7 +101,7 @@ def export_kit(
 ) -> Response:
     _validate_source(store, settings)
     route = parse_gpx(store.load(settings.source.id))
-    kit = build_kit(settings, route, deps)
+    kit = build_kit(settings, route, deps, printable_landcover=True)
     zip_bytes = to_stl_zip(kit)
     return Response(
         content=zip_bytes,

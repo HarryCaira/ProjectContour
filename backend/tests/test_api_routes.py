@@ -246,7 +246,10 @@ def test__build_mesh_stream__reports_stages_and_returns_glb(client):
         "frame", "terrain", "water", "land", "details", "preview",
     ]
     assert events[-1]["type"] == "result"
-    assert base64.b64decode(events[-1]["glb"]).startswith(b"glTF")
+    binary = b"".join(base64.b64decode(event["data"]) for event in events if event["type"] == "mesh_chunk")
+    assert binary.startswith(b"glTF")
+    assert len(binary) == next(event["bytes"] for event in events if event["type"] == "mesh_start")
+    assert all(len(event["data"]) <= 256 * 1024 for event in events if event["type"] == "mesh_chunk")
     assert "land" in events[-1]["metadata"]["parts"]
     assert len(events[-1]["metadata"]["parts"]) == len(events[-1]["metadata"]["triangles"])
 

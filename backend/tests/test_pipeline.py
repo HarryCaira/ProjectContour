@@ -184,6 +184,7 @@ def test__build_kit__physical_units_and_fixed_route_height(tmp_path, size_mm):
 @pytest.mark.parametrize("shape", ["lake", "edge", "island", "full"])
 def test_water_is_a_surface_insert_with_solid_terrain_below(tmp_path, monkeypatch, size_mm, exaggeration, shape):
     _add_terrain_mock()
+    _add_biomes_mock()
     area = {}
 
     def water_polygons(frame, *_, **kwargs):
@@ -278,3 +279,71 @@ def test_detail_settings_reach_pipeline_and_invalidate_cached_terrain(tmp_path, 
     settings.terrain.detail.smoothing_max_mm = .02
     build_kit(settings, _route(), deps)
     assert len(calls['build_land_mesh']) == 2
+
+
+@responses.activate
+def test_woodland_is_partitioned_only_for_export(tmp_path, monkeypatch):
+    _add_terrain_mock()
+    _add_biomes_mock()
+    calls = []
+    def coverage(frame, *args):
+        calls.append(True)
+        return {'wood': box(-20,-20,20,20)}
+    monkeypatch.setattr(pipeline_module, 'fetch_landcover_regions', coverage)
+    settings = _settings(biomes={'woodland': {'enabled': True}}, style={'colours': {'woodland': '#123456'}})
+    preview = build_kit(settings, _route(), _deps(tmp_path))
+    assert not calls and preview.part('woodland') is None
+    exported = build_kit(settings, _route(), _deps(tmp_path), printable_landcover=True)
+    assert calls and exported.part('woodland').mesh.is_volume
+    assert exported.part('woodland').material.colour == '#123456'
+    assert exported.part('land').mesh.volume + exported.part('woodland').mesh.volume > preview.part('land').mesh.volume
+
+
+@responses.activate
+@pytest.mark.parametrize('wood_enabled', [False, True])
+def test_rock_export_is_coloured_and_complements_terrain(tmp_path, monkeypatch, wood_enabled):
+    _add_terrain_mock()
+    _add_biomes_mock()
+    monkeypatch.setattr(pipeline_module, 'fetch_landcover_regions', lambda *args: {
+        'rock': box(-35,-20,-5,20), 'wood': box(5,-20,35,20),
+    })
+    settings = _settings(biomes={'rock': {'enabled': True}, 'woodland': {'enabled': wood_enabled}},
+                         style={'colours': {'rock': '#987654', 'woodland': '#123456'}})
+    preview = build_kit(settings, _route(), _deps(tmp_path))
+    assert preview.part('rock') is None
+    exported = build_kit(settings, _route(), _deps(tmp_path), printable_landcover=True)
+    assert exported.part('rock').mesh.is_volume
+    assert exported.part('rock').material.colour == '#987654'
+    assert (exported.part('woodland') is not None) == wood_enabled
+    parts = [p.mesh for p in exported.parts if p.name in ('land', 'rock', 'woodland')]
+    if wood_enabled:
+        assert sum(p.volume for p in parts) > preview.part('land').mesh.volume
+    else:
+        assert sum(p.volume for p in parts) == pytest.approx(preview.part('land').mesh.volume, rel=1e-5)
+    for i, part in enumerate(parts):
+        for other in parts[i+1:]:
+            overlap = trimesh.boolean.intersection([part, other], engine='manifold')
+            assert overlap.is_empty or abs(overlap.volume) < 1e-5
+    with zipfile.ZipFile(io.BytesIO(to_stl_zip(exported))) as archive:
+        rock = trimesh.load(io.BytesIO(archive.read('rock.stl')), file_type='stl')
+        assert rock.is_volume
+
+
+@responses.activate
+def test_infrastructure_is_visible_and_exportable(tmp_path, monkeypatch):
+    _add_terrain_mock()
+    _add_biomes_mock()
+    monkeypatch.setattr(pipeline_module, 'fetch_infrastructure', lambda *args: (
+        box(-15,-10,-14,10), [(box(15,-17,17,-15), .8)]))
+    settings = _settings(biomes={'roads': {'enabled': True}, 'buildings': {'enabled': True}},
+                         style={'colours': {'roads':'#112233','buildings':'#abcdef'}})
+    kit = build_kit(settings, _route(), _deps(tmp_path))
+    assert kit.part('roads') is not None and kit.part('roads').mesh.is_volume
+    assert kit.part('buildings') is not None and kit.part('buildings').mesh.is_volume
+    assert kit.part('roads').material.colour == '#112233'
+    assert kit.part('buildings').material.colour == '#abcdef'
+    from contour.stl_export import to_stl_zip
+    import io, zipfile
+    with zipfile.ZipFile(io.BytesIO(to_stl_zip(kit))) as archive:
+        assert 'roads.stl' in archive.namelist()
+        assert 'buildings.stl' in archive.namelist()

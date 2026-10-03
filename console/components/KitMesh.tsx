@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, useCallback, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, type RefObject } from "react";
 import { Bvh } from "@react-three/drei";
-import { Group, Mesh, MeshStandardMaterial, TextureLoader, NearestFilter, NoColorSpace } from "three";
+import { Color, Group, Mesh, MeshStandardMaterial, TextureLoader, LinearFilter, NoColorSpace } from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { normaliseKit, prepareTerrainShading, setKitExaggeration, measureKit, setKitColours } from "@/lib/kit-scene";
+import { normaliseKit, disposeKit, prepareTerrainShading, prepareRoadRendering, setKitExaggeration, measureKit, setKitColours } from "@/lib/kit-scene";
 
+import { applySnow } from "@/lib/snow-material";
 import { applyLandCover } from "@/lib/landcover-material";
 import type { LandCover } from "@/lib/api";
 import type { ModelColours } from "@/lib/settings";
@@ -13,6 +14,8 @@ import type { ModelColours } from "@/lib/settings";
 import { ModelDimensions } from "./ModelDimensions";
 
 interface KitMeshProps {
+  coverEnabled: { woodland: boolean; rock: boolean };
+  snow?: { enabled: boolean; snowline: number };
   glb: ArrayBuffer;
   landCover?: LandCover;
   meshSizeMm: number;
@@ -28,7 +31,17 @@ interface KitMeshProps {
   onReady: (glb: ArrayBuffer) => void;
 }
 
-export function KitMesh({ glb, landCover, meshSizeMm, modelRef, colours, verticalExaggeration, modelScale, routeWidthScale, routeHeightScale, physicalSizeMm, showDimensions, onError, onReady }: KitMeshProps) {
+export function KitMesh({ coverEnabled, snow, glb, landCover, meshSizeMm, modelRef, colours, verticalExaggeration, modelScale, routeWidthScale, routeHeightScale, physicalSizeMm, showDimensions, onError, onReady }: KitMeshProps) {
+  const coverState = useRef({ woodland: { value: 1 }, rock: { value: 1 } });
+  coverState.current.woodland.value = coverEnabled.woodland ? 1 : 0;
+  coverState.current.rock.value = coverEnabled.rock ? 1 : 0;
+  const snowState = useRef({ enabled: { value: 0 }, line: { value: .72 }, colour: new Color("#f3f4ef") });
+  snowState.current.enabled.value = snow?.enabled ? 1 : 0;
+  snowState.current.line.value = snow?.snowline ?? .72;
+  snowState.current.colour.set(colours.snow ?? "#f3f4ef");
+  const woodlandPhysicalScale = useRef({ value: 1 });
+  woodlandPhysicalScale.current.value = physicalSizeMm / meshSizeMm;
+  const coverColours = useRef({ woodland: new Color("#365d38"), rock: new Color("#96928a") });
   const attachModel = useCallback((object: Group | null) => {
     modelRef.current = object ?? new Group();
   }, [modelRef]);
@@ -37,6 +50,7 @@ export function KitMesh({ glb, landCover, meshSizeMm, modelRef, colours, vertica
 
   useEffect(() => {
     let cancelled = false;
+    let loadedRoot: Group | undefined;
     setRoot(null);
     onError(null);
     const fail = (error: unknown): void => {
@@ -46,7 +60,7 @@ export function KitMesh({ glb, landCover, meshSizeMm, modelRef, colours, vertica
     };
     const loader = new GLTFLoader();
     loader.parse(glb, "", (gltf) => {
-      if (cancelled) return;
+      if (cancelled) { disposeKit(gltf.scene); return; }
       try {
         gltf.scene.traverse((obj) => {
           if (obj instanceof Mesh) {
@@ -57,12 +71,15 @@ export function KitMesh({ glb, landCover, meshSizeMm, modelRef, colours, vertica
           }
         });
         prepareTerrainShading(gltf.scene);
-        setRoot(normaliseKit(gltf.scene));
+        prepareRoadRendering(gltf.scene);
+        loadedRoot = normaliseKit(gltf.scene);
+        setRoot(loadedRoot);
       } catch (error) {
+        disposeKit(gltf.scene);
         fail(error);
       }
     }, fail);
-    return () => { cancelled = true; };
+    return () => { cancelled = true; if (loadedRoot) disposeKit(loadedRoot); };
   }, [glb, onError]);
 
   useLayoutEffect(() => {
@@ -73,22 +90,27 @@ export function KitMesh({ glb, landCover, meshSizeMm, modelRef, colours, vertica
   }, [root, verticalExaggeration, physicalSizeMm, routeWidthScale, routeHeightScale]);
 
   useLayoutEffect(() => {
+    coverColours.current.woodland.set(colours.woodland ?? "#365d38");
+    coverColours.current.rock.set(colours.rock ?? "#96928a");
     if (root) setKitColours(root, colours);
   }, [root, colours]);
 
   useEffect(() => {
-    if (!root || !landCover) return;
+    if (!root) return;
+    if (!landCover) return applySnow(root, snowState.current);
     let cancelled = false;
     let restore: (() => void) | undefined;
     const texture = new TextureLoader().load(landCover.image, loaded => {
       if (cancelled) return;
       loaded.colorSpace = NoColorSpace;
-      loaded.minFilter = loaded.magFilter = NearestFilter;
+      loaded.minFilter = loaded.magFilter = LinearFilter;
       loaded.generateMipmaps = false;
-      restore = applyLandCover(root, loaded, landCover.bounds, meshSizeMm);
+      const restoreCover = applyLandCover(root, loaded, landCover.bounds, meshSizeMm, coverColours.current, woodlandPhysicalScale.current, coverState.current);
+      const restoreSnow = applySnow(root, snowState.current);
+      restore = () => { restoreSnow(); restoreCover(); };
     });
     return () => { cancelled = true; restore?.(); texture.dispose(); };
-  }, [root, landCover, meshSizeMm]);
+  }, [root, landCover, meshSizeMm, applyLandCover]);
 
   useLayoutEffect(() => {
     if (root) onReady(glb);

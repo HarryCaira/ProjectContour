@@ -2,8 +2,6 @@ import { create } from "zustand";
 import { defaultSettings, type Settings, type Source } from "@/lib/settings";
 
 interface EditorState {
-  showLandCover: boolean;
-  setShowLandCover: (show: boolean) => void;
   source: Source | null;
   settings: Settings | null;
   setSource: (source: Source) => void;
@@ -14,8 +12,6 @@ interface EditorState {
 
 /** Physical controls belong to the serialisable settings used for export. */
 export const useEditorStore = create<EditorState>((set) => ({
-  showLandCover: true,
-  setShowLandCover: (showLandCover) => set({ showLandCover }),
   source: null,
   settings: null,
   setSource: (source) => set({ source, settings: defaultSettings(source) }),

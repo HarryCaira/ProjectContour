@@ -14,8 +14,6 @@ export function EditorPanel() {
   const setVerticalExaggeration = useEditorStore((s) => s.setVerticalExaggeration);
 
   const exportMut = useExport();
-  const showLandCover = useEditorStore(s => s.showLandCover);
-  const setShowLandCover = useEditorStore(s => s.setShowLandCover);
 
   return (
     <aside className="w-[320px] shrink-0 border-l border-line bg-canvas h-full flex flex-col">
@@ -81,6 +79,24 @@ export function EditorPanel() {
                 step={0.05}
                 onChange={setVerticalExaggeration}
               />
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" className="accent-accent" checked={settings.biomes.snow?.enabled ?? false}
+                  onChange={e => updateSettings(s => ({ ...s, biomes: { ...s.biomes, snow: { snowline: s.biomes.snow?.snowline ?? .72, enabled: e.target.checked } } }))} />
+                Snow cap
+              </label>
+              {settings.biomes.snow?.enabled && <>
+                <Slider label="Snowline" value={Math.round(settings.biomes.snow.snowline * 100)} min={0} max={100} step={1} unit="%"
+                  onChange={value => updateSettings(s => ({ ...s, biomes: { ...s.biomes, snow: { ...s.biomes.snow, snowline: value / 100 } } }))} />
+                <p className="text-xs text-muted">Stylised snow. Snowline is relative to the landscape’s height.</p>
+              </> }
+              {([['woodland', 'Woodland'], ['rock', 'Rock'], ['roads', 'Major roads'], ['buildings', 'Larger buildings']] as const).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" className="accent-accent" checked={settings.biomes[key]?.enabled ?? false}
+                    onChange={e => { const enabled = e.target.checked; updateSettings(s => ({ ...s, biomes: { ...s.biomes, [key]: { enabled } } })); }} />
+                  {label}
+                </label>
+              ))}
+
 
             </section>
 
@@ -112,12 +128,7 @@ export function EditorPanel() {
                   Reset
                 </button>
               </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={showLandCover} onChange={e => setShowLandCover(e.target.checked)} className="accent-accent" />
-                Woodland and rock
-              </label>
-              <p className="text-xs text-muted">Preview only. Woodland is dark green; rock is grey. These colours are not included in the STL kit.</p>
-              {(["route", "terrain", "water"] as const).map((part) => {
+              {(["route", "terrain", "water", "woodland", "rock", "snow", "roads", "buildings"] as const).map((part) => {
                 const colour = settings.style.colours?.[part] ?? DEFAULT_COLOURS[part];
                 return (
                   <label key={part} className="flex items-center justify-between gap-3 text-sm">
@@ -144,7 +155,7 @@ export function EditorPanel() {
               <h2 className="text-xs uppercase tracking-wider text-muted">Export</h2>
               <button
                 type="button"
-                onClick={() => exportMut.mutateAsync(settings).then(triggerDownload)}
+                onClick={() => exportMut.mutate(settings, { onSuccess: triggerDownload })}
                 disabled={exportMut.isPending}
                 className="w-full px-4 py-2 text-sm tracking-tightish rounded-md border border-line bg-canvas text-ink hover:border-ink transition-colors disabled:opacity-50"
               >
