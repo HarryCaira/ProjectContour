@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { MeshProgress } from "@/lib/mesh-stream";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchMesh, uploadGpx, downloadExport } from "@/lib/api";
+import { fetchMesh, uploadGpx, downloadExport, fetchFeatureCoverage } from "@/lib/api";
 import type { Settings } from "@/lib/settings";
 import { previewSettings } from "@/lib/preview-settings";
 
@@ -39,7 +39,7 @@ export function useMesh(settings: Settings | null) {
   }, [desiredKey, geometryKey, size]);
   const [progress, setProgress] = useState<(MeshProgress & { key: string | null }) | null>(null);
   const query = useQuery({
-    queryKey: ["mesh-interactive-v11", key],
+    queryKey: ["mesh-interactive-v21", key],
     queryFn: async ({ signal }) => {
       const requested = JSON.parse(key!) as Settings;
       setProgress({ key, stage: "starting" });
@@ -65,3 +65,14 @@ export function useExport() {
 }
 
 export { useQueryClient };
+
+/** Layer switches must not change source availability or hide their own controls. */
+export function useFeatureCoverage(settings: Settings | null) {
+  return useQuery({
+    queryKey: ["feature-coverage-v3", settings?.source, settings?.framing, settings?.physical.sizeMm],
+    queryFn: ({ signal }) => fetchFeatureCoverage(settings!, signal),
+    enabled: !!settings,
+    staleTime: Infinity,
+    retry: false,
+  });
+}

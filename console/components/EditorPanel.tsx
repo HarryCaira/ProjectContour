@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useEditorStore } from "@/lib/editor-store";
 import { DEFAULT_COLOURS } from "@/lib/settings";
-import { useExport } from "@/lib/hooks";
+import { useExport, useFeatureCoverage } from "@/lib/hooks";
 import { UploadButton } from "./UploadButton";
 import { Slider } from "./Slider";
 
@@ -14,6 +14,7 @@ export function EditorPanel() {
   const setVerticalExaggeration = useEditorStore((s) => s.setVerticalExaggeration);
 
   const exportMut = useExport();
+  const coverage = useFeatureCoverage(settings);
 
   return (
     <aside className="w-[320px] shrink-0 border-l border-line bg-canvas h-full flex flex-col">
@@ -89,15 +90,15 @@ export function EditorPanel() {
                   onChange={value => updateSettings(s => ({ ...s, biomes: { ...s.biomes, snow: { ...s.biomes.snow, snowline: value / 100 } } }))} />
                 <p className="text-xs text-muted">Stylised snow. Snowline is relative to the landscape’s height.</p>
               </> }
-              {([['woodland', 'Woodland'], ['rock', 'Rock'], ['roads', 'Major roads'], ['buildings', 'Larger buildings']] as const).map(([key, label]) => (
+              {([['woodland', 'Woodland'], ['rock', 'Rock'], ['roads', 'Roads'], ['buildings', 'Buildings']] as const).filter(([key]) => coverage.data?.[key] === true).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2 text-sm">
                   <input type="checkbox" className="accent-accent" checked={settings.biomes[key]?.enabled ?? false}
                     onChange={e => { const enabled = e.target.checked; updateSettings(s => ({ ...s, biomes: { ...s.biomes, [key]: { enabled } } })); }} />
                   {label}
                 </label>
               ))}
-
-
+              {coverage.isError && <button type="button" className="text-xs text-muted underline"
+                onClick={() => void coverage.refetch()}>Retry map feature check</button>}
             </section>
 
             <Divider />
@@ -128,7 +129,12 @@ export function EditorPanel() {
                   Reset
                 </button>
               </div>
-              {(["route", "terrain", "water", "woodland", "rock", "snow", "roads", "buildings"] as const).map((part) => {
+              {(["route", "terrain", "water", "woodland", "rock", "snow", "roads", "buildings"] as const).filter((part) => {
+                if (part === "terrain") return true;
+                if (part === "route") return settings.route.enabled;
+                if (part === "snow") return settings.biomes.snow.enabled && settings.biomes.snow.snowline < 1;
+                return settings.biomes[part].enabled && coverage.data?.[part] === true;
+              }).map((part) => {
                 const colour = settings.style.colours?.[part] ?? DEFAULT_COLOURS[part];
                 return (
                   <label key={part} className="flex items-center justify-between gap-3 text-sm">

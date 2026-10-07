@@ -107,6 +107,10 @@ export function Scene() {
           Updating print detail… You can keep editing.
         </div>
       )}
+      <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer"
+        className="absolute bottom-1 right-3 text-[10px] text-muted">
+        © OpenStreetMap contributors
+      </a>
       <StatusOverlay
         loading={(!meshQuery.data && (meshQuery.isFetching || !!settings)) || (!!meshQuery.data && readyGlb !== meshQuery.data.glb)}
         stage={meshQuery.isFetching ? meshQuery.progress?.stage ?? "starting" : "display"}

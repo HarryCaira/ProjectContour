@@ -287,3 +287,50 @@ def test_mesh_stream_explains_detail_limit(client, monkeypatch):
     assert "600,000 vertices (limit 600,000)" in event["message"]
     assert event["details"] == {"reason": "vertices", "count": 600_000, "limit": 600_000}
     assert "try again" not in event["message"].lower()
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_feature_coverage_is_independent_of_layer_switches(client, monkeypatch, present):
+    from shapely.geometry import Polygon, box
+    geometry = box(0, 0, .001, .001) if present else Polygon()
+    monkeypatch.setattr("contour.api.fetch_landcover_regions", lambda *args: {
+        "wood": geometry, "rock": geometry, "water": Polygon(),
+    })
+    def infrastructure(*args, include_roofs):
+        assert include_roofs is False
+        return geometry, [(geometry, 10)] if present else [], Polygon()
+    monkeypatch.setattr("contour.api.fetch_infrastructure", infrastructure)
+    upload = client.post("/upload", files={"file": ("track.gpx", SIMPLE_GPX)}).json()
+    for enabled in (False, True):
+        response = client.post("/coverage", json={
+            "source": {"id": upload["id"], "sha256": upload["sha256"]},
+            "biomes": {key: {"enabled": enabled} for key in ("woodland", "rock", "roads", "buildings")},
+        })
+        assert response.status_code == 200
+        assert response.json() == {**dict.fromkeys(("woodland", "rock", "roads", "buildings"), present), "water": False}
+
+
+def test_feature_coverage_uses_physical_scale_and_excludes_water(client, monkeypatch):
+    from shapely.geometry import Polygon, box
+    monkeypatch.setattr("contour.api.fetch_landcover_regions", lambda *args: {
+        "wood": Polygon(), "rock": Polygon(), "water": box(-1000, -1000, 1000, 1000),
+    })
+    scales = []
+    def infrastructure(frame, http, cache, token, mm_per_m, **kwargs):
+        scales.append(mm_per_m)
+        return box(0, 0, 1, 1), [(box(0, 0, 1, 1), 10)], Polygon()
+    monkeypatch.setattr("contour.api.fetch_infrastructure", infrastructure)
+    upload = client.post("/upload", files={"file": ("track.gpx", SIMPLE_GPX)}).json()
+    for size in (100, 150):
+        response = client.post("/coverage", json={
+            "source": {"id": upload["id"], "sha256": upload["sha256"]},
+            "physical": {"sizeMm": size},
+        })
+        assert response.status_code == 200
+        assert response.json() == {"water": True, "woodland": False, "rock": False, "roads": False, "buildings": False}
+    assert scales[1] == pytest.approx(scales[0] * 1.5)
+
+
+def test_feature_coverage_validates_source(client):
+    response = client.post("/coverage", json={"source": {"id": "missing", "sha256": "a" * 64}})
+    assert response.status_code == 404

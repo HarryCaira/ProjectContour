@@ -83,8 +83,9 @@ and raised height default to 1 mm. Dimension labels dim behind the model, and
 the dimensions toggle shows or hides them immediately.
 
 Woodland and rock coverage uses cached Mapbox Streets tiles through `/landcover`.
-Water, land cover and infrastructure use at most 256 vector tiles per area, reducing
-zoom for regional routes while retaining zoom 14 for local models. Missing all-ocean
+Water and land cover use at most 256 vector tiles per layer and area, reducing
+zoom for regional routes while retaining zoom 14 for local models. Roads and buildings
+share zoom 16 tiles for local models, with the same 256-tile cap and disk cache. Missing all-ocean
 Terrain-RGB tiles are decoded as sea level; other provider failures remain errors.
 The preview colours the existing surface and stays aligned when changing size.
 With coverage enabled, STL export includes separate `woodland.stl` and `rock.stl` parts
@@ -105,15 +106,40 @@ Original cached tiles remain untouched. Point-touching water regions receive
 consistent surface levels and tiny finite connections to avoid discontinuities
 and non-manifold solids. Concurrent tile-cache writes use separate temporary files.
 
-Woodland relief uses overlapping, irregular oval canopy crowns with varied
-sizes, orientation and heights, clustered spacing and gaps. At 100 mm across
-5 km, crown heights are 0.30–0.70 mm. Crown spacing, radius and height scale
-with millimetres per geographic metre, bounded to 0.5–2 times that reference. Crowns
-follow the terrain and keep clear of woodland boundaries and the route. Export
-contains real raised geometry; the fast preview uses a shading approximation.
-
-Woodland crowns shrink and taper down near coverage boundaries and route edges.
-The viewer uses a distance-based edge fade instead of an abrupt canopy mask;
-printed material boundaries remain discrete between filament colours.
+Woodland follows the terrain surface without added canopy texture or raised relief.
+Its colour remains editable, with a separate shallow material part in STL exports.
 
 STL exports are validated after float32 serialization and reloading. Numerical contacts are separated with bounded sub-0.002 mm adjustments; open surfaces and repairs that change volume materially are rejected. Every exported part must have closed, consistently oriented topology with no collapsed or duplicate triangles. This validates the file itself rather than relying on the in-memory mesh alone.
+
+Buildings retain mapped component heights and minimum heights, union shared walls and
+trim route/water clearance instead of dropping whole intersecting buildings. Connected
+terraces are filtered as blocks using a 0.25 mm width and 0.0625 mm² area threshold.
+Ground elevation is sampled inside the footprint. Missing heights use a marked
+6 m estimate internally; the minimum printed building height remains 0.4 mm. Roofs
+use mapped shape tags where available, retaining flat roofs otherwise. Component extrusion uses
+Manifold cross sections to handle dense footprints and courtyards robustly.
+
+For local models (frame radius up to 2.5 km), a cached OpenStreetMap Overpass query
+supplements Mapbox with roof tags on closed building ways. Gabled, hipped,
+pyramidal, skillion, barrel, dome and conical roofs require a close unambiguous
+footprint match and mapped roof height (or a supported mapped pitch). Gabled, hipped, pyramidal and
+barrel roofs require near-rectangular footprints; explicitly directed single-slope
+parts may use irregular footprints and taper to their base; domes and cones require near-elliptical
+footprints. Curved caps use adaptive tessellation targeting approximately 0.01 mm
+chord error, capped at 512 segments. Pitch-derived height is supported for gabled,
+hipped, skillion and circular conical roofs; absent or invalid measurements stay flat. Unsupported/complex shapes,
+relations, uncertain building heights and incomplete tags retain flat roofs.
+Roof relief below 0.1 mm or spans below 0.4 mm are omitted. Source roof height is
+included within total building height, and roof alignment survives clearance trimming.
+The optional lookup has a short timeout and no retries; failures preserve buildings.
+Successful source responses are cached across physical size edits. Roof data:
+© OpenStreetMap contributors, https://www.openstreetmap.org/copyright.
+
+Roads include local streets, service roads, tracks, pedestrian streets and paths.
+Road-class width estimates are preserved for wider roads; narrower roads are widened
+to a minimum 0.2 mm in both preview and export so the street network stays visible.
+Widths are recalculated for model size changes. Roads bypass land-cover erosion and
+outline simplification to preserve narrow bends and junctions. Mapped bridges are
+supported surface crossings, including shallow inserts in water, and export with
+the roads material. These are stylised crossings, not elevated structural bridge
+models. Tunnels remain excluded.

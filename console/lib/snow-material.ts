@@ -38,8 +38,7 @@ export function applySnow(root: Group, state: { enabled: { value: number }; line
           float snowMask = snowEnabled*vSnowSurface*step(.25,snowSlope)*step(.000001,snowRange)*smoothstep(-.004,.004,snowField);
           diffuseColor.rgb = mix(diffuseColor.rgb,snowColour,snowMask);
           #include <roughnessmap_fragment>`);
-        // Snow covers the woodland canopy's shading as well as its colour.
-        shader.fragmentShader = shader.fragmentShader.replace('woodHeight *=', 'woodHeight *= (1.0-snowMask);\n          woodHeight *=');
+
       };
       material.customProgramCacheKey = () => `${baseKey}:snow-v1`;
       material.needsUpdate = true;

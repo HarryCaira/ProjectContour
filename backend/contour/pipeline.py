@@ -23,7 +23,6 @@ from contour.water_mesh import build_water_mesh, shoreline_water_levels
 from contour.kit import MeshKit, KitPart, Material
 from contour.landcover import fetch_landcover_regions
 from contour.landcover_mesh import split_surface_material
-from contour.woodland_texture import add_woodland_texture
 from contour.snow import snow_region
 from contour.infrastructure import fetch_infrastructure, build_buildings
 from contour.route import Route
@@ -196,7 +195,7 @@ def build_kit(
     kit = _resolve_style(settings.style.name).apply(scene, settings)
     infrastructure_coverage = shapely.Polygon()
     if settings.biomes.roads.enabled or settings.biomes.buildings.enabled:
-        roads, candidates = fetch_infrastructure(hex_frame, deps.http_client, deps.tile_cache, deps.mapbox_token, mm_per_m)
+        roads, candidates, bridges = fetch_infrastructure(hex_frame, deps.http_client, deps.tile_cache, deps.mapbox_token, mm_per_m)
         water_region_mm = scale_polygon(shapely.union_all(water_polygons), mm_per_m, mm_per_m, origin=(0, 0))
         building_coverage = shapely.Polygon()
         if settings.biomes.buildings.enabled:
@@ -209,11 +208,21 @@ def build_kit(
                 kit.parts.append(KitPart(name='buildings', mesh=buildings, material=Material(colour=settings.style.colours.buildings)))
         infrastructure_coverage = building_coverage
         if settings.biomes.roads.enabled:
-            roads = roads.difference(shapely.union_all([water_region_mm, building_coverage]))
-            land, road_part = split_surface_material(land, roads, min_feature_mm=.3)
+            # Ground roads stop at water; only explicitly mapped bridges cross it.
+            roads = shapely.union_all([roads.difference(water_region_mm), bridges]).difference(building_coverage)
+            land, road_part = split_surface_material(land, roads.difference(water_region_mm), preserve_network=True)
             kit.part('land').mesh = land
-            if road_part is not None:
-                kit.parts.append(KitPart(name='roads', mesh=road_part, material=Material(colour=settings.style.colours.roads)))
+            road_parts = [road_part] if road_part is not None else []
+            if water is not None and not bridges.is_empty:
+                water, crossing = split_surface_material(
+                    water, bridges.difference(building_coverage), preserve_network=True)
+                kit.part('water').mesh = water
+                if crossing is not None:
+                    road_parts.append(crossing)
+            if road_parts:
+                road_mesh = (trimesh.boolean.union(road_parts, engine='manifold')
+                             if len(road_parts) > 1 else road_parts[0])
+                kit.parts.append(KitPart(name='roads', mesh=road_mesh, material=Material(colour=settings.style.colours.roads)))
             infrastructure_coverage = shapely.union_all([infrastructure_coverage, roads])
     snow_coverage = shapely.Polygon()
     if printable_landcover and settings.biomes.snow.enabled:
@@ -237,8 +246,6 @@ def build_kit(
             region = region.difference(shapely.union_all([snow_coverage, infrastructure_coverage]))
             remaining, insert = split_surface_material(remaining, region)
             if insert is not None:
-                if name == 'woodland':
-                    insert = add_woodland_texture(insert, region, remaining, route_mesh, mm_per_m=mm_per_m)
                 kit.parts.append(KitPart(name=name, mesh=insert, material=Material(colour=colour)))
         kit.part('land').mesh = remaining
     return kit
