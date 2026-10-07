@@ -296,7 +296,7 @@ def test_woodland_is_partitioned_only_for_export(tmp_path, monkeypatch):
     exported = build_kit(settings, _route(), _deps(tmp_path), printable_landcover=True)
     assert calls and exported.part('woodland').mesh.is_volume
     assert exported.part('woodland').material.colour == '#123456'
-    assert exported.part('land').mesh.volume + exported.part('woodland').mesh.volume > preview.part('land').mesh.volume
+    assert exported.part('land').mesh.volume + exported.part('woodland').mesh.volume == pytest.approx(preview.part('land').mesh.volume, rel=1e-5)
 
 
 @responses.activate
@@ -316,10 +316,7 @@ def test_rock_export_is_coloured_and_complements_terrain(tmp_path, monkeypatch, 
     assert exported.part('rock').material.colour == '#987654'
     assert (exported.part('woodland') is not None) == wood_enabled
     parts = [p.mesh for p in exported.parts if p.name in ('land', 'rock', 'woodland')]
-    if wood_enabled:
-        assert sum(p.volume for p in parts) > preview.part('land').mesh.volume
-    else:
-        assert sum(p.volume for p in parts) == pytest.approx(preview.part('land').mesh.volume, rel=1e-5)
+    assert sum(p.volume for p in parts) == pytest.approx(preview.part('land').mesh.volume, rel=1e-5)
     for i, part in enumerate(parts):
         for other in parts[i+1:]:
             overlap = trimesh.boolean.intersection([part, other], engine='manifold')
@@ -334,7 +331,7 @@ def test_infrastructure_is_visible_and_exportable(tmp_path, monkeypatch):
     _add_terrain_mock()
     _add_biomes_mock()
     monkeypatch.setattr(pipeline_module, 'fetch_infrastructure', lambda *args: (
-        box(-15,-10,-14,10), [(box(15,-17,17,-15), .8)]))
+        box(-15,-10,-14,10), [(box(15,-17,17,-15), .8)], Polygon()))
     settings = _settings(biomes={'roads': {'enabled': True}, 'buildings': {'enabled': True}},
                          style={'colours': {'roads':'#112233','buildings':'#abcdef'}})
     kit = build_kit(settings, _route(), _deps(tmp_path))
@@ -347,3 +344,23 @@ def test_infrastructure_is_visible_and_exportable(tmp_path, monkeypatch):
     with zipfile.ZipFile(io.BytesIO(to_stl_zip(kit))) as archive:
         assert 'roads.stl' in archive.namelist()
         assert 'buildings.stl' in archive.namelist()
+
+
+@responses.activate
+def test_mapped_bridge_crosses_water_in_road_export(tmp_path, monkeypatch):
+    _add_terrain_mock()
+    _add_biomes_mock()
+    monkeypatch.setattr(pipeline_module, 'fetch_water_polygons', lambda *args, **kwargs: [box(-5,-40,5,40)])
+    monkeypatch.setattr(pipeline_module, 'fetch_infrastructure', lambda *args: (
+        Polygon(), [], box(-10,-.1,10,.1)))
+    kit = build_kit(_settings(biomes={'roads': {'enabled': True}, 'buildings': {'enabled': False}}), _route(), _deps(tmp_path))
+    roads = kit.part('roads').mesh
+    assert roads.is_volume
+    # The mapped crossing must remain visible at the river centre.
+    from shapely import union_all
+    top = roads.triangles[roads.triangles_center[:,2] > kit.part('water').mesh.bounds[1,2] - 1e-5]
+    assert union_all([Polygon(t[:,:2]) for t in top]).covers(Point(0,0))
+    overlap = trimesh.boolean.intersection([roads, kit.part('water').mesh], engine='manifold')
+    assert overlap.is_empty or abs(overlap.volume) < 1e-5
+    with zipfile.ZipFile(io.BytesIO(to_stl_zip(kit))) as archive:
+        assert 'roads.stl' in archive.namelist()

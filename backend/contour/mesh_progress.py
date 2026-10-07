@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import logging
+import traceback
 from collections.abc import AsyncIterator
 from threading import Event
 
@@ -53,7 +54,9 @@ async def stream_mesh(settings: Settings, route: Route, deps: PipelineDependenci
         except ContourError as error:
             send({"type": "error", "code": error.code, "message": error.message, "details": error.details})
         except Exception as error:
-            logging.getLogger(__name__).error("Model build failed: %s", type(error).__name__)
+            frames = traceback.extract_tb(error.__traceback__)
+            location = " > ".join(f"{frame.name}:{frame.lineno}" for frame in frames)
+            logging.getLogger(__name__).error("Model build failed: %s (%s)", type(error).__name__, location)
             # Provider exceptions can contain credential-bearing URLs.
             send({"type": "error", "message": "We couldn't build this model. Please try again."})
 

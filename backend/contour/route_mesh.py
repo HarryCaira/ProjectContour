@@ -81,6 +81,9 @@ def build_route_mesh(
         idx = np.linspace(0, len(pts_2d) - 1, max_segments + 1).astype(int)
         pts_2d = pts_2d[idx]
 
+    # Repeated recordings at one position do not form a ribbon segment.
+    keep = np.r_[True, np.linalg.norm(np.diff(pts_2d, axis=0), axis=1) > 1e-9]
+    pts_2d = pts_2d[keep]
     n = len(pts_2d)
     if n < 2:
         return None
@@ -100,6 +103,11 @@ def build_route_mesh(
     tangents[0] = pts_2d[1] - pts_2d[0]
     tangents[-1] = pts_2d[-1] - pts_2d[-2]
     tangents[1:-1] = pts_2d[2:] - pts_2d[:-2]
+    # At an exact out-and-back turn the central difference is zero. Keep
+    # the incoming section direction instead of collapsing its width to zero.
+    zero = np.linalg.norm(tangents, axis=1) < 1e-9
+    incoming = np.vstack([pts_2d[1]-pts_2d[0], np.diff(pts_2d, axis=0)])
+    tangents[zero] = incoming[zero]
     norms = np.linalg.norm(tangents, axis=1, keepdims=True)
     norms = np.where(norms == 0, 1.0, norms)
     tangents = tangents / norms

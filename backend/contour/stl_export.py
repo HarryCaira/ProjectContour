@@ -22,7 +22,7 @@ def to_stl_zip(kit: MeshKit) -> bytes:
 
 
 def _manifest(kit: MeshKit, stats: dict | None = None) -> dict:
-    return {'units': 'mm', 'parts': [
+    return {'units': 'mm', 'attribution': '© OpenStreetMap contributors — https://www.openstreetmap.org/copyright', 'parts': [
         {'name': p.name, 'material': {'colour': p.material.colour,
                                     'roughness': p.material.roughness, 'metalness': p.material.metalness},
          'stats': (stats or {}).get(p.name, {'vertices': int(len(p.mesh.vertices)), 'faces': int(len(p.mesh.faces)),

@@ -38,3 +38,9 @@ class HttpClient:
         response = self.session.get(url, params=params, timeout=self.timeout)
         response.raise_for_status()
         return response.content
+
+    def post(self, url: str, data: dict | None = None) -> bytes:
+        """POST a query without automatic retries (unlike cached tile GETs)."""
+        response = self.session.post(url, data=data, timeout=self.timeout)
+        response.raise_for_status()
+        return response.content

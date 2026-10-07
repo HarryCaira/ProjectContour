@@ -87,3 +87,14 @@ export async function fetchLandCover(settings: Settings, signal?: AbortSignal): 
   if (!response.ok) throw await asError(response);
   return response.json();
 }
+
+export type FeatureCoverage = Record<"water" | "woodland" | "rock" | "roads" | "buildings", boolean>;
+
+export async function fetchFeatureCoverage(settings: Settings, signal?: AbortSignal): Promise<FeatureCoverage> {
+  const response = await fetch(`${BASE}/coverage`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify(settings), signal,
+  });
+  if (!response.ok) throw await asError(response);
+  return response.json();
+}

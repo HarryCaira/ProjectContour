@@ -11,7 +11,9 @@ from contour.gltf_export import to_glb
 from contour.stl_export import to_stl_zip
 from contour.gpx import parse_gpx
 from contour.hex_frame import hex_frame_for_route
-from contour.landcover import fetch_landcover
+from contour.landcover import fetch_landcover, fetch_landcover_regions
+from contour.infrastructure import fetch_infrastructure
+from shapely.affinity import scale
 from contour.pipeline import PipelineDependencies, build_kit
 from contour.settings import Settings
 from contour.gpx_store import GpxStore
@@ -127,3 +129,27 @@ def landcover_preview(
     route = parse_gpx(store.load(settings.source.id))
     frame = hex_frame_for_route(route, padding_ratio=settings.framing.padding_ratio)
     return fetch_landcover(frame, deps.http_client, deps.tile_cache, deps.mapbox_token)
+
+
+@router.post("/coverage")
+def feature_coverage(
+    settings: Settings,
+    store: GpxStore = Depends(get_gpx_store),
+    deps: PipelineDependencies = Depends(get_pipeline_deps),
+) -> dict[str, bool]:
+    """Source availability is independent of whether a layer is switched on."""
+    _validate_source(store, settings)
+    route = parse_gpx(store.load(settings.source.id))
+    frame = hex_frame_for_route(route, padding_ratio=settings.framing.padding_ratio)
+    mm_per_m = settings.physical.size_mm / (2 * frame.circumradius_m)
+    regions = fetch_landcover_regions(frame, deps.http_client, deps.tile_cache, deps.mapbox_token)
+    roads, buildings, bridges = fetch_infrastructure(frame, deps.http_client, deps.tile_cache,
+                                             deps.mapbox_token, mm_per_m, include_roofs=False)
+    water = scale(regions['water'], mm_per_m, mm_per_m, origin=(0, 0))
+    return {
+        'water': regions['water'].area > 0,
+        'woodland': regions['wood'].area > 0,
+        'rock': regions['rock'].area > 0,
+        'roads': roads.difference(water).area > 0 or bridges.area > 0,
+        'buildings': any(candidate[0].difference(water).area > 0 for candidate in buildings),
+    }

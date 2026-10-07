@@ -140,3 +140,24 @@ def test_dense_recording_does_not_exhaust_route_budget():
         width_m=5, height_above_terrain_m=2, surface_tolerance_m=.1,
         sample_spacing_m=2, max_points=100)
     assert mesh is not None and mesh.is_volume
+
+
+def test_exact_turnaround_keeps_nonzero_width_and_exports():
+    from contour.stl_export import _validated_stl
+    route=Route(latitudes=np.array([0,0,0,0,.0001]),
+                longitudes=np.array([-.0002,0,.0001,0,.0002]), elevations=np.zeros(5))
+    mesh=build_route_mesh(route,HexFrame(0,0,200),_flat_heightmap(),width_m=.4,height_above_terrain_m=.4)
+    assert mesh is not None
+    offsets=mesh.vertex_attributes['_route_offset']
+    assert np.allclose(np.linalg.norm(offsets[:,:2],axis=1),.2)
+    assert mesh.nondegenerate_faces(height=1e-8).all()
+    assert _validated_stl('route',mesh)
+
+
+def test_duplicate_positions_do_not_create_zero_length_sections():
+    route=Route(latitudes=np.zeros(4),longitudes=np.array([0,0,.0001,.0002]),elevations=np.zeros(4))
+    mesh=build_route_mesh(route,HexFrame(0,0,200),_flat_heightmap(),width_m=.4,height_above_terrain_m=.4)
+    assert mesh is not None and mesh.is_volume
+    assert mesh.nondegenerate_faces(height=1e-8).all()
+    stationary=Route(latitudes=np.zeros(3),longitudes=np.zeros(3),elevations=np.zeros(3))
+    assert build_route_mesh(stationary,HexFrame(0,0,200),_flat_heightmap(),width_m=.4,height_above_terrain_m=.4) is None

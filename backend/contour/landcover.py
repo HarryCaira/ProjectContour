@@ -67,7 +67,7 @@ def coverage_preview(regions: dict, domain: shapely.Geometry, resolution: int = 
         image.paste(colour, mask=mask)
         percentages[name] = round(100 * region.area / domain.area, 2)
     # Store woodland distance-to-edge in blue. This permits a smooth physical
-    # taper rather than abruptly clipping canopy normals at four sample points.
+    # colour transition at woodland boundaries.
     pixels_array = np.asarray(image).copy()
     woodland = pixels_array[:, :, 0] > 0
     step_y = (bounds[3] - bounds[1]) / (resolution - 1)
