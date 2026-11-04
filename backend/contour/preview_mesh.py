@@ -8,19 +8,21 @@ PREVIEW_TRIGGER_FACES = 1_000_000
 PREVIEW_TOLERANCE_MM = 0.01
 
 
-def display_kit(kit: MeshKit) -> MeshKit:
-    if sum(len(part.mesh.faces) for part in kit.parts) <= PREVIEW_TRIGGER_FACES:
+def display_kit(kit: MeshKit, *, force: bool = False, tolerance_mm: float = PREVIEW_TOLERANCE_MM) -> MeshKit:
+    if not force and sum(len(part.mesh.faces) for part in kit.parts) <= PREVIEW_TRIGGER_FACES:
         return kit
     parts = []
     for part in kit.parts:
         mesh = part.mesh
         # Preserve route/building attributes for interactive height/width edits.
         if part.name in {'land', 'water', 'roads'} and len(mesh.faces) > 100_000:
+            # Native boolean output can expose read-only/strided arrays.
+            # Mesh64 requires writable, contiguous buffers.
             solid = manifold3d.Manifold(manifold3d.Mesh64(
-                np.asarray(mesh.vertices, dtype=np.float64),
-                np.asarray(mesh.faces, dtype=np.uint64)))
+                np.array(mesh.vertices, dtype=np.float64, order="C", copy=True),
+                np.array(mesh.faces, dtype=np.uint64, order="C", copy=True)))
             if solid.status() == manifold3d.Error.NoError:
-                reduced = solid.simplify(PREVIEW_TOLERANCE_MM).to_mesh64()
+                reduced = solid.simplify(tolerance_mm).to_mesh64()
                 if 0 < len(reduced.tri_verts) < len(mesh.faces):
                     candidate = trimesh.Trimesh(vertices=np.asarray(reduced.vert_properties)[:, :3],
                                                 faces=np.asarray(reduced.tri_verts), process=False)

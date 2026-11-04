@@ -22,9 +22,11 @@ from contour.terrain_cache import cached_terrain
 from contour.water_mesh import build_water_mesh, shoreline_water_levels
 from contour.kit import MeshKit, KitPart, Material
 from contour.landcover import fetch_landcover_regions
-from contour.landcover_mesh import split_surface_material
+from contour.rock_transition import natural_rock_region
+from contour.landcover_mesh import split_surface_material, surface_difference
 from contour.snow import snow_region
 from contour.infrastructure import fetch_infrastructure, build_buildings
+from contour.preview_mesh import display_kit
 from contour.route import Route
 from contour.settings import Settings, DetailSettings
 from contour.style import NeutralScene, Style
@@ -50,16 +52,45 @@ class PipelineDependencies:
     mapbox_token: str
 
 
-def build_kit(
+def build_kit(settings, route, deps, on_progress=None, printable_landcover=False, preview=False):
+    """Overlap independent map preparation for previews; retain exact exports."""
+    if preview and printable_landcover:
+        raise ValueError("Preview geometry cannot be used for printable exports")
+    if not preview or not (settings.biomes.roads.enabled or settings.biomes.buildings.enabled):
+        return _build_kit(settings, route, deps, on_progress, printable_landcover, preview)
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    frame = hex_frame_for_route(route, padding_ratio=settings.framing.padding_ratio)
+    bounds = frame.polygon_enu().bounds
+    mm_per_m = settings.physical.size_mm / max(bounds[2]-bounds[0], bounds[3]-bounds[1])
+    cancelled = Event()
+    def checkpoint():
+        if cancelled.is_set():
+            raise InterruptedError("Preview request cancelled")
+    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="contour-infrastructure")
+    future = worker.submit(fetch_infrastructure, frame, deps.http_client, deps.tile_cache,
+                           deps.mapbox_token, mm_per_m, checkpoint=checkpoint)
+    try:
+        return _build_kit(settings, route, deps, on_progress, printable_landcover, preview, future)
+    finally:
+        cancelled.set()
+        worker.shutdown(wait=False, cancel_futures=True)
+
+
+def _build_kit(
     settings: Settings, route: Route, deps: PipelineDependencies,
     on_progress: Callable[[str], None] | None = None,
     printable_landcover: bool = False,
+    preview: bool = False,
+    infrastructure_future=None,
 ) -> MeshKit:
     """Run the full pipeline and return a styled MeshKit.
 
     Stages: framing -> terrain fetch -> biomes fetch -> Z planning ->
     neutral meshes -> style application.
     """
+    if preview and printable_landcover:
+        raise ValueError("Preview geometry cannot be used for printable exports")
     source_detail = settings.terrain.maximum_source_detail
     detail = settings.terrain.detail or DetailSettings(force_source_zoom=source_detail, smoothing_max_mm=0 if source_detail else 0.05)
     report = on_progress or (lambda stage: None)
@@ -95,7 +126,7 @@ def build_kit(
     model_world_diameter_m = 2 * hex_frame.circumradius_m
     base_thickness_m = max(0.05 * elev_range, 0.005 * model_world_diameter_m)
     land_base_z = elev_min - base_thickness_m
-    plinth_height_m = 0.05 * model_world_diameter_m
+    plinth_height_m = 0.025 * model_world_diameter_m
     exaggeration = settings.terrain.vertical_exaggeration
     water_levels = shoreline_water_levels(
         water_polygons, heightmap, hex_frame, bottom_z=land_base_z, recess_m=0,
@@ -193,9 +224,31 @@ def build_kit(
 
     scene = NeutralScene(land=land, water=water, route=route_mesh, plinth=plinth)
     kit = _resolve_style(settings.style.name).apply(scene, settings)
+    if preview:
+        # Spend 0.009 mm of the existing 0.01 mm display tolerance before
+        # feature booleans; reserve 0.001 mm for removing their cut-edge detail.
+        # Exports continue to use the untouched terrain mesh.
+        kit = display_kit(kit, force=True, tolerance_mm=0.009)
+        land = kit.part('land').mesh
+        if water is not None:
+            water = kit.part('water').mesh
+
     infrastructure_coverage = shapely.Polygon()
     if settings.biomes.roads.enabled or settings.biomes.buildings.enabled:
-        roads, candidates, bridges = fetch_infrastructure(hex_frame, deps.http_client, deps.tile_cache, deps.mapbox_token, mm_per_m)
+        if infrastructure_future is not None:
+            from concurrent.futures import TimeoutError
+            while True:
+                report("details")
+                try:
+                    roads, candidates, bridges = infrastructure_future.result(timeout=.1)
+                    break
+                except TimeoutError:
+                    if infrastructure_future.done():
+                        raise  # Preserve a provider timeout rather than waiting forever.
+        else:
+            roads, candidates, bridges = fetch_infrastructure(
+                hex_frame, deps.http_client, deps.tile_cache, deps.mapbox_token,
+                mm_per_m, checkpoint=lambda: report("details"))
         water_region_mm = scale_polygon(shapely.union_all(water_polygons), mm_per_m, mm_per_m, origin=(0, 0))
         building_coverage = shapely.Polygon()
         if settings.biomes.buildings.enabled:
@@ -203,7 +256,7 @@ def build_kit(
             if route_mesh is not None:
                 projected = shapely.polygons(route_mesh.triangles[:, :, :2])
                 exclusion = shapely.union_all([exclusion, shapely.union_all(projected[shapely.area(projected) > 1e-10]).buffer(.15)])
-            buildings, building_coverage = build_buildings(land, candidates, exclusion)
+            buildings, building_coverage = build_buildings(land, candidates, exclusion, preview=preview, checkpoint=lambda: report("details"))
             if buildings is not None:
                 kit.parts.append(KitPart(name='buildings', mesh=buildings, material=Material(colour=settings.style.colours.buildings)))
         infrastructure_coverage = building_coverage
@@ -243,12 +296,16 @@ def build_kit(
                 continue
             coverage = regions[source].difference(water_region)
             region = scale_polygon(coverage, xfact=mm_per_m, yfact=mm_per_m, origin=(0, 0))
-            region = region.difference(shapely.union_all([snow_coverage, infrastructure_coverage]))
+            if name == 'rock':
+                region = natural_rock_region(
+                    region, scale_polygon(hex_frame.polygon_enu(), mm_per_m, mm_per_m, origin=(0, 0)),
+                    scale_polygon(water_region, mm_per_m, mm_per_m, origin=(0, 0)))
+            region = surface_difference(region, shapely.GeometryCollection([snow_coverage, infrastructure_coverage]))
             remaining, insert = split_surface_material(remaining, region)
             if insert is not None:
                 kit.parts.append(KitPart(name=name, mesh=insert, material=Material(colour=colour)))
         kit.part('land').mesh = remaining
-    return kit
+    return display_kit(kit, force=True, tolerance_mm=0.001) if preview else kit
 
 
 def _resolve_style(name: str) -> Style:

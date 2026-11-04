@@ -16,13 +16,14 @@ export const FramingSchema = z.object({
 });
 
 export const PhysicalSchema = z.object({
-  sizeMm: z.number().positive().default(100),
+  sizeMm: z.number().positive().default(150),
   resolutionMm: z.number().positive().default(0.2),
 });
 
-export const DEFAULT_COLOURS = { roads: "#555454", buildings: "#c5b6a2", snow: "#f3f4ef", terrain: "#7a8060", water: "#6a8aa0", route: "#c44545", woodland: "#365d38", rock: "#96928a" };
+export const DEFAULT_COLOURS = { base: "#2a2a2a", roads: "#555454", buildings: "#c5b6a2", snow: "#f3f4ef", terrain: "#7a8060", water: "#6a8aa0", route: "#c44545", woodland: "#365d38", rock: "#96928a" };
 const hexColour = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 export const ColoursSchema = z.object({
+  base: hexColour.default(DEFAULT_COLOURS.base),
   roads: hexColour.default(DEFAULT_COLOURS.roads),
   buildings: hexColour.default(DEFAULT_COLOURS.buildings),
   snow: hexColour.default(DEFAULT_COLOURS.snow),

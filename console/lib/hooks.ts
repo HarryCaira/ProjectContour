@@ -39,7 +39,7 @@ export function useMesh(settings: Settings | null) {
   }, [desiredKey, geometryKey, size]);
   const [progress, setProgress] = useState<(MeshProgress & { key: string | null }) | null>(null);
   const query = useQuery({
-    queryKey: ["mesh-interactive-v21", key],
+    queryKey: ["mesh-interactive-v24", key],
     queryFn: async ({ signal }) => {
       const requested = JSON.parse(key!) as Settings;
       setProgress({ key, stage: "starting" });

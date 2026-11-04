@@ -161,3 +161,15 @@ def test_duplicate_positions_do_not_create_zero_length_sections():
     assert mesh.nondegenerate_faces(height=1e-8).all()
     stationary=Route(latitudes=np.zeros(3),longitudes=np.zeros(3),elevations=np.zeros(3))
     assert build_route_mesh(stationary,HexFrame(0,0,200),_flat_heightmap(),width_m=.4,height_above_terrain_m=.4) is None
+
+
+def test_retraced_route_preserves_sections_and_exports():
+    from contour.stl_export import _validated_stl
+    route = Route(latitudes=np.zeros(6),
+                  longitudes=np.array([0,.001,.002,.001,0,-.001]),
+                  elevations=np.zeros(6))
+    frame = HexFrame(centre_lon=0, centre_lat=0, circumradius_m=500)
+    mesh = build_route_mesh(route, frame, _flat_heightmap(), width_m=1, height_above_terrain_m=1)
+    assert mesh.is_watertight and mesh.is_volume
+    assert len(mesh.vertex_attributes['_route_offset']) == len(mesh.vertices)
+    assert _validated_stl('route', mesh)

@@ -21,5 +21,5 @@ class MonochromeBiome(Style):
         if scene.route is not None:
             parts.append(KitPart(name="route", mesh=scene.route, material=replace(self.ROUTE, colour=settings.style.colours.route)))
         if scene.plinth is not None:
-            parts.append(KitPart(name="plinth", mesh=scene.plinth, material=self.PLINTH))
+            parts.append(KitPart(name="plinth", mesh=scene.plinth, material=replace(self.PLINTH, colour=settings.style.colours.base)))
         return MeshKit(parts=parts)

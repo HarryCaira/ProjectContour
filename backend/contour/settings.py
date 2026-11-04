@@ -20,13 +20,14 @@ class Framing(BaseModel):
 
 
 class Physical(BaseModel):
-    size_mm: float = Field(100.0, gt=0, alias="sizeMm")
+    size_mm: float = Field(150.0, gt=0, alias="sizeMm")
     resolution_mm: float = Field(0.2, gt=0, alias="resolutionMm")
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class ModelColours(BaseModel):
+    base: str = Field("#2a2a2a", pattern=r"^#[0-9a-fA-F]{6}$")
     roads: str = Field("#555454", pattern=r"^#[0-9a-fA-F]{6}$")
     buildings: str = Field("#c5b6a2", pattern=r"^#[0-9a-fA-F]{6}$")
     snow: str = Field("#f3f4ef", pattern=r"^#[0-9a-fA-F]{6}$")

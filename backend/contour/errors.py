@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from shapely.errors import GEOSException
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -50,6 +52,14 @@ class MeshDetailLimitError(ContourError, ValueError):
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(GEOSException)
+    async def _handle_geometry_error(request: Request, exc: GEOSException) -> JSONResponse:
+        return JSONResponse(status_code=422, content={
+            "code": "geometry_error",
+            "message": "The model's surface boundaries could not be combined. Please try disabling roads or land-cover layers and retry.",
+            "details": {},
+        })
+
     @app.exception_handler(ContourError)
     async def _handle_contour_error(request: Request, exc: ContourError) -> JSONResponse:
         return JSONResponse(

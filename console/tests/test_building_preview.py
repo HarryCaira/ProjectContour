@@ -14,9 +14,15 @@ const p=building.geometry.attributes.position;
 const offsets=new Float32Array(p.count*3);
 for(let i=0;i<p.count;i++) if(p.getZ(i)>2.5) offsets[i*3+2]=1;
 building.geometry.setAttribute('_route_offset',new Float32BufferAttribute(offsets,3));scene.add(building);
-const root=normaliseKit(scene);setKitExaggeration(root,2,4,5);
-const z=Array.from(building.geometry.attributes.position.array).filter((_,i)=>i%3===2);
-assert.equal(Math.max(...z),5);assert.equal(Math.min(...z),4);
+const root=normaliseKit(scene);
+// A development hot update must keep transforms for an already loaded model.
+const {setKitExaggeration: updatedExaggeration} = await import('./lib/kit-scene.ts?hot-update');
+for (const exaggeration of [.5,1,2,4,1]) {
+  updatedExaggeration(root,exaggeration,4,5);
+  const z=Array.from(building.geometry.attributes.position.array).filter((_,i)=>i%3===2);
+  assert.equal(Math.max(...z)-Math.min(...z),1);
+  assert.equal(Math.min(...z),2*exaggeration);
+}
 '''
     subprocess.run(['node','--experimental-strip-types','--input-type=module','-e',script],
                    cwd=Path(__file__).resolve().parents[1],check=True,capture_output=True,text=True)

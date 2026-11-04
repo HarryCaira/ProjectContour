@@ -112,3 +112,53 @@ def test_road_clipping_slivers_collapse_at_solid_precision(width):
     assert len(road.split()) == 1
     assert road.volume == pytest.approx(8*.2*.6, rel=1e-6)
     assert _validated_stl('roads',road,repair=False)
+
+
+def test_surface_difference_ignores_collapsed_lines_and_points():
+    from shapely.geometry import GeometryCollection, LineString, Point
+    from contour.landcover_mesh import surface_difference
+    region = GeometryCollection([box(0,0,4,4), LineString([(5,0),(6,0)])])
+    exclusion = GeometryCollection([box(2,0,4,4), LineString([(0,0),(4,4)]), Point(1,1)])
+    result = surface_difference(region, exclusion)
+    assert result.equals(box(0,0,2,4))
+    assert surface_difference(region, Point(1,1)).equals(box(0,0,4,4))
+    assert surface_difference(Point(0,0), exclusion).is_empty
+
+
+def test_snow_boundaries_are_repaired_after_simplification():
+    from pathlib import Path
+    import shapely
+    from contour.landcover_mesh import printable_coverage
+
+    # Two actual Ben Nevis snow islands. The input is valid, but simplification
+    # creates nested shells and the old buffer/intersection raises GEOSException.
+    region = shapely.from_wkb(
+        (Path(__file__).parent / 'fixtures' / 'snow_nested_boundaries.wkb').read_bytes())
+    assert region.is_valid
+    simplified = region.simplify(.025, preserve_topology=True)
+    assert not simplified.is_valid
+    repaired = shapely.make_valid(simplified)
+    expected = repaired.buffer(-.2).buffer(.2).intersection(repaired)
+    coverage = shapely.union_all(printable_coverage(region))
+    assert coverage.is_valid and coverage.area > 0
+    assert coverage.difference(repaired).area < 1e-8
+    # Only islands smaller than the existing 0.4 mm feature filter may vanish.
+    expected_area = sum(p.area for p in expected.geoms if p.area >= .4 ** 2)
+    assert coverage.area == pytest.approx(expected_area, abs=1e-8)
+
+
+def test_nested_polygon_collections_keep_the_whole_road_network():
+    from shapely.geometry import GeometryCollection, MultiPolygon, LineString
+    from contour.biome_data import _flatten_polygons
+    from contour.stl_export import _validated_stl
+    region = GeometryCollection([
+        box(-4,-.1,4,.1),
+        GeometryCollection([MultiPolygon([box(-4,1,4,1.2), box(-4,-1.2,4,-1)]),
+                            LineString([(0,0),(1,1)])])])
+    assert sum(p.area for p in _flatten_polygons(region)) == pytest.approx(region.area)
+    land = trimesh.creation.box(extents=[10,10,4])
+    base, roads = split_surface_material(land, region, preserve_network=True)
+    assert roads.volume == pytest.approx(region.area * .6, rel=1e-5)
+    assert len(roads.split()) == 3
+    assert _validated_stl('roads', roads)
+    assert _validated_stl('land', base)

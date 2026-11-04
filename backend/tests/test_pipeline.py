@@ -79,12 +79,14 @@ def _deps(tmp_path) -> PipelineDependencies:
     )
 
 
+@pytest.mark.parametrize("size_mm", [100, 150])
 @responses.activate
-def test_build_kit_produces_land_plinth_route_without_water(tmp_path):
+def test_build_kit_produces_land_plinth_route_without_water(tmp_path, size_mm):
     _add_terrain_mock()
     _add_biomes_mock(water_polygons=None)
 
-    kit = build_kit(_settings(), _route(), _deps(tmp_path))
+    kit = build_kit(_settings(physical={"sizeMm": size_mm}), _route(), _deps(tmp_path))
+    assert kit.part("plinth").mesh.extents[2] == pytest.approx(size_mm * 0.025)
     names = {p.name for p in kit.parts}
     assert "land" in names
     assert "plinth" in names
@@ -330,7 +332,7 @@ def test_rock_export_is_coloured_and_complements_terrain(tmp_path, monkeypatch, 
 def test_infrastructure_is_visible_and_exportable(tmp_path, monkeypatch):
     _add_terrain_mock()
     _add_biomes_mock()
-    monkeypatch.setattr(pipeline_module, 'fetch_infrastructure', lambda *args: (
+    monkeypatch.setattr(pipeline_module, 'fetch_infrastructure', lambda *args, **kwargs: (
         box(-15,-10,-14,10), [(box(15,-17,17,-15), .8)], Polygon()))
     settings = _settings(biomes={'roads': {'enabled': True}, 'buildings': {'enabled': True}},
                          style={'colours': {'roads':'#112233','buildings':'#abcdef'}})
@@ -351,7 +353,7 @@ def test_mapped_bridge_crosses_water_in_road_export(tmp_path, monkeypatch):
     _add_terrain_mock()
     _add_biomes_mock()
     monkeypatch.setattr(pipeline_module, 'fetch_water_polygons', lambda *args, **kwargs: [box(-5,-40,5,40)])
-    monkeypatch.setattr(pipeline_module, 'fetch_infrastructure', lambda *args: (
+    monkeypatch.setattr(pipeline_module, 'fetch_infrastructure', lambda *args, **kwargs: (
         Polygon(), [], box(-10,-.1,10,.1)))
     kit = build_kit(_settings(biomes={'roads': {'enabled': True}, 'buildings': {'enabled': False}}), _route(), _deps(tmp_path))
     roads = kit.part('roads').mesh
@@ -364,3 +366,49 @@ def test_mapped_bridge_crosses_water_in_road_export(tmp_path, monkeypatch):
     assert overlap.is_empty or abs(overlap.volume) < 1e-5
     with zipfile.ZipFile(io.BytesIO(to_stl_zip(kit))) as archive:
         assert 'roads.stl' in archive.namelist()
+
+
+@responses.activate
+def test_preview_reduces_display_terrain_before_buildings_only(tmp_path, monkeypatch):
+    _add_terrain_mock()
+    _add_biomes_mock()
+    order = []
+    original = pipeline_module.display_kit
+    def reduce(kit, **kwargs):
+        order.append('display')
+        return original(kit, **kwargs)
+    monkeypatch.setattr(pipeline_module, 'display_kit', reduce)
+    monkeypatch.setattr(pipeline_module, 'fetch_infrastructure',
+                        lambda *args, **kwargs: (Polygon(), [], Polygon()))
+    def buildings(*args, **kwargs):
+        order.append(('buildings', kwargs['preview']))
+        return None, Polygon()
+    monkeypatch.setattr(pipeline_module, 'build_buildings', buildings)
+    settings = _settings(biomes={'roads': {'enabled': False}, 'buildings': {'enabled': True}})
+    build_kit(settings, _route(), _deps(tmp_path), preview=True)
+    assert order == ['display', ('buildings', True), 'display']
+    order.clear()
+    build_kit(settings, _route(), _deps(tmp_path), printable_landcover=True)
+    assert order == [('buildings', False)]
+
+
+def test_preview_failure_cancels_background_feature_work(tmp_path, monkeypatch):
+    from threading import Event
+    started, stopped = Event(), Event()
+    def fetch(*args, checkpoint, **kwargs):
+        started.set()
+        try:
+            while not stopped.wait(.01):
+                checkpoint()
+        except InterruptedError:
+            stopped.set()
+            raise
+    def fail(*args):
+        assert started.wait(2)
+        raise InterruptedError('cancelled')
+    monkeypatch.setattr(pipeline_module, 'fetch_infrastructure', fetch)
+    monkeypatch.setattr(pipeline_module, '_build_kit', fail)
+    with pytest.raises(InterruptedError):
+        build_kit(_settings(biomes={'buildings': {'enabled': True}}),
+                  _route(), _deps(tmp_path), preview=True)
+    assert stopped.wait(2)

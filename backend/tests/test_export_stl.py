@@ -134,3 +134,49 @@ def test_zero_area_cleanup_removes_only_whole_closed_shells():
     collapsed.update_faces([True,True,True,False])
     _remove_zero_area_shells(collapsed)
     assert len(collapsed.faces)==3
+
+
+def test_dense_woodland_boundary_slivers_survive_stl_roundtrip():
+    """Real marathon woodland component that defeated the first repair tolerance."""
+    from pathlib import Path
+    import numpy as np
+    import pytest
+    from contour.errors import ContourError
+    from contour.stl_export import _validated_stl
+    with np.load(Path(__file__).parent / 'fixtures' / 'woodland_stl_slivers.npz') as data:
+        original = trimesh.Trimesh(data['vertices'], data['faces'], process=False)
+    with pytest.raises(ContourError):
+        _validated_stl('woodland', original, repair=False)
+    result = trimesh.load(io.BytesIO(_validated_stl('woodland', original)), file_type='stl')
+    assert result.is_volume
+    assert np.all(np.bincount(result.edges_unique_inverse) == 2)
+    assert result.nondegenerate_faces(height=1e-8).all()
+    assert result.unique_faces().all()
+    assert result.volume == pytest.approx(original.volume, rel=1e-4)
+    _, distance, _ = trimesh.proximity.closest_point_naive(original, result.vertices)
+    assert distance.max() <= 0.0018
+
+
+def test_water_shoreline_contacts_survive_stl_without_retriangulating():
+    """Real Large urban water mesh: six edges collapsed when written as STL."""
+    from pathlib import Path
+    import numpy as np
+    import pytest
+    from scipy.spatial import cKDTree
+    from contour.errors import ContourError
+    from contour.stl_export import _validated_stl
+    with np.load(Path(__file__).parent / 'fixtures' / 'water_stl_contacts.npz') as data:
+        original = trimesh.Trimesh(data['vertices'], data['faces'], process=False)
+    assert original.is_volume
+    with pytest.raises(ContourError) as error:
+        _validated_stl('water', original, repair=False)
+    assert error.value.details['non_manifold_edges'] == 6
+    assert error.value.details['degenerate_faces'] == 6
+    decoded = trimesh.load(io.BytesIO(_validated_stl('water', original)), file_type='stl', process=True)
+    assert decoded.is_volume
+    assert np.all(np.bincount(decoded.edges_unique_inverse) == 2)
+    assert decoded.nondegenerate_faces(height=1e-8).all()
+    assert decoded.unique_faces().all()
+    assert len(decoded.faces) == len(original.faces)
+    assert decoded.volume == pytest.approx(original.volume, rel=1e-4)
+    assert cKDTree(original.vertices).query(decoded.vertices)[0].max() <= .0018

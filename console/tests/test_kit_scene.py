@@ -169,11 +169,11 @@ for (const name of ['land', 'water', 'route', 'plinth']) {
 }
 const kit = normaliseKit(scene);
 const geometry = parts.route.geometry;
-setKitColours(kit, {terrain:'#123456', water:'#abcdef', route:'#fedcba'});
+setKitColours(kit, {terrain:'#123456', water:'#abcdef', route:'#fedcba', base:'#654321'});
 assert.equal(parts.land.material.color.getHexString(), '123456');
 assert.equal(parts.water.material.color.getHexString(), 'abcdef');
 assert.equal(parts.route.material.color.getHexString(), 'fedcba');
-assert.equal(parts.plinth.material.color.getHexString(), 'ffffff');
+assert.equal(parts.plinth.material.color.getHexString(), '654321');
 assert.equal(parts.route.geometry, geometry);
 """
     subprocess.run(
@@ -190,6 +190,7 @@ import { normaliseKit, setKitExaggeration } from './lib/kit-scene.ts';
 import { defaultSettings } from './lib/settings.ts';
 import { previewSettings } from './lib/preview-settings.ts';
 const settings = defaultSettings({type:'gpx', id:'x', sha256:'test'});
+assert.equal(settings.physical.sizeMm, 150);
 const originalKey = JSON.stringify(previewSettings(settings));
 settings.route.widthMm = 4;
 settings.route.heightAboveTerrainMm = 3;
