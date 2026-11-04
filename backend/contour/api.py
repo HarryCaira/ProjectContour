@@ -68,7 +68,7 @@ def build_mesh(
 ) -> Response:
     _validate_source(store, settings)
     route = parse_gpx(store.load(settings.source.id))
-    kit = build_kit(settings, route, deps)
+    kit = build_kit(settings, route, deps, preview=True)
     glb_bytes = to_glb(kit)
     return Response(
         content=glb_bytes,
@@ -128,7 +128,7 @@ def landcover_preview(
     _validate_source(store, settings)
     route = parse_gpx(store.load(settings.source.id))
     frame = hex_frame_for_route(route, padding_ratio=settings.framing.padding_ratio)
-    return fetch_landcover(frame, deps.http_client, deps.tile_cache, deps.mapbox_token)
+    return fetch_landcover(frame, deps.http_client, deps.tile_cache, deps.mapbox_token, settings.physical.size_mm)
 
 
 @router.post("/coverage")

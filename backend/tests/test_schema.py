@@ -13,7 +13,7 @@ def test_minimal_settings_uses_defaults():
     s = Settings.model_validate({"schemaVersion": 1, "source": VALID_SOURCE})
     assert s.framing.shape == "hex"
     assert s.framing.padding_ratio == 0.15
-    assert s.physical.size_mm == 100.0
+    assert s.physical.size_mm == 150.0
     assert s.physical.resolution_mm == 0.2
     assert s.style.name == "monochrome-biome"
     assert s.terrain.vertical_exaggeration == 1.5

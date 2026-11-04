@@ -129,8 +129,9 @@ export function EditorPanel() {
                   Reset
                 </button>
               </div>
-              {(["route", "terrain", "water", "woodland", "rock", "snow", "roads", "buildings"] as const).filter((part) => {
+              {(["route", "terrain", "base", "water", "woodland", "rock", "snow", "roads", "buildings"] as const).filter((part) => {
                 if (part === "terrain") return true;
+                if (part === "base") return settings.plinth.enabled;
                 if (part === "route") return settings.route.enabled;
                 if (part === "snow") return settings.biomes.snow.enabled && settings.biomes.snow.snowline < 1;
                 return settings.biomes[part].enabled && coverage.data?.[part] === true;

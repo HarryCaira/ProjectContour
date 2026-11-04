@@ -164,10 +164,10 @@ def _flatten_polygons(geom) -> list[Polygon]:
         return []
     if geom.geom_type == "Polygon":
         return [geom]
-    if geom.geom_type == "MultiPolygon":
-        return list(geom.geoms)
-    if geom.geom_type == "GeometryCollection":
-        return [g for g in geom.geoms if g.geom_type == "Polygon"]
+    if geom.geom_type in {"MultiPolygon", "GeometryCollection"}:
+        # Geometry repair can nest MultiPolygons inside collections alongside
+        # collapsed lines. Keep every area, including entire road networks.
+        return [polygon for part in geom.geoms for polygon in _flatten_polygons(part)]
     return []
 
 

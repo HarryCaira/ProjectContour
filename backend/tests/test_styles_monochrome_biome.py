@@ -58,10 +58,11 @@ def test_custom_palette_preserves_defaults_and_is_exported():
     settings.style.colours.terrain = "#123456"
     settings.style.colours.water = "#abcdef"
     settings.style.colours.route = "#fedcba"
+    settings.style.colours.base = "#654321"
     scene = NeutralScene(land=_box(), water=_box(), route=_box(), plinth=_box())
     kit = MonochromeBiome().apply(scene, settings)
     with zipfile.ZipFile(io.BytesIO(to_stl_zip(kit))) as archive:
         manifest = json.loads(archive.read("manifest.json"))
     colours = {p["name"]: p["material"]["colour"] for p in manifest["parts"]}
-    assert colours == {"land": "#123456", "water": "#abcdef", "route": "#fedcba", "plinth": "#2a2a2a"}
+    assert colours == {"land": "#123456", "water": "#abcdef", "route": "#fedcba", "plinth": "#654321"}
     assert MonochromeBiome().apply(scene, _settings()).part("land").material.colour == "#7a8060"

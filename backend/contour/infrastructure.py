@@ -1,5 +1,10 @@
 """Prominent mapped buildings and ground-level roads at printable scale."""
 from collections import defaultdict
+from collections.abc import Callable
+import hashlib
+import json
+from threading import Lock
+from weakref import WeakValueDictionary
 from contour.biome_data import vector_zoom
 import math
 import logging
@@ -56,7 +61,8 @@ def _printable(polygon: shapely.Geometry) -> bool:
     return polygon.area >= MIN_BUILDING_AREA_MM2 and not polygon.buffer(-MIN_BUILDING_WIDTH_MM / 2).is_empty
 
 
-def fetch_infrastructure(frame: HexFrame, client: HttpClient, cache: TileCache, token: str, mm_per_m: float, *, include_roofs: bool = True) -> tuple[shapely.Geometry, list[BuildingCandidate], shapely.Geometry]:
+def _fetch_infrastructure(frame: HexFrame, client: HttpClient, cache: TileCache, token: str, mm_per_m: float, *, checkpoint: Callable[[], None] | None = None) -> tuple[shapely.Geometry, list[BuildingCandidate], shapely.Geometry]:
+    checkpoint = checkpoint or (lambda: None)
     domain = frame.polygon_enu()
     roads = []
     bridges = []
@@ -70,6 +76,7 @@ def fetch_infrastructure(frame: HexFrame, client: HttpClient, cache: TileCache, 
         for tile in tiles_covering_bbox(*_hex_geographic_bbox(frame), zoom):
             requests.setdefault(tile, set()).add(layer_name)
     for tile, layer_names in requests.items():
+        checkpoint()
         decoded = mapbox_vector_tile.decode(_fetch_tile_with_cache(client, cache, token, tile))
         for name in sorted(layer_names):
             layer = decoded.get(name, {})
@@ -127,33 +134,96 @@ def fetch_infrastructure(frame: HexFrame, client: HttpClient, cache: TileCache, 
                for key, pieces in buildings.items()}
     coverage = shapely.union_all([p for p in _flatten_polygons(shapely.union_all(list(regions.values())))
                                  if _printable(p)])
+    shapely.prepare(coverage)
     candidates = []
     for key, region in regions.items():
-        for polygon in _flatten_polygons(region.intersection(coverage)):
+        checkpoint()
+        clipped = region if coverage.covers(region) else region.intersection(coverage)
+        for polygon in _flatten_polygons(clipped):
             height = max(.4, heights[key]*mm_per_m)
             base = bases[key]*mm_per_m
             if base < height:
                 candidates.append(BuildingCandidate(polygon, height, base, estimated[key]))
-    if include_roofs and candidates and cache is not None:
-        roof_features = fetch_roofs(frame, cache, mm_per_m)
-        roof_tree = shapely.STRtree([feature.footprint for feature in roof_features])
-        candidates = [c._replace(roof=matched_roof(c.footprint, roof_features, roof_tree, mm_per_m,
-                                                   c.height, c.min_height)) if not c.estimated_height else c
-                      for c in candidates]
     logger.info("Buildings: %d mapped features, %d printable pieces in %d source tiles (%d estimated heights)",
                 len(buildings), len(candidates), len(requests), sum(c.estimated_height for c in candidates))
     bridge_region = scale(shapely.union_all(bridges), mm_per_m, mm_per_m, origin=(0, 0))
     return road_region, candidates, bridge_region
 
 
-def build_buildings(land: trimesh.Trimesh, candidates: list[BuildingCandidate], exclusion: shapely.Geometry) -> tuple[trimesh.Trimesh | None, shapely.Geometry]:
+
+# Share the expensive projected data between coverage, previews and exports.
+# Roof enrichment remains separate so a transient optional lookup is not cached.
+_cache_guard = Lock()
+_cache_locks = WeakValueDictionary()
+
+
+def fetch_infrastructure(frame, client, cache, token, mm_per_m, *, include_roofs=True, checkpoint=None):
+    checkpoint = checkpoint or (lambda: None)
+    if cache is None:
+        result = _fetch_infrastructure(frame, client, cache, token, mm_per_m, checkpoint=checkpoint)
+    else:
+        key = hashlib.sha256(json.dumps([frame.centre_lon, frame.centre_lat,
+            frame.circumradius_m, mm_per_m]).encode()).hexdigest()
+        identity = (str(cache.root), key)
+        with _cache_guard:
+            lock = _cache_locks.setdefault(identity, Lock())
+        while not lock.acquire(timeout=.1):
+            checkpoint()
+        try:
+            checkpoint()
+            data = cache.get('derived', 'infrastructure-v1', 0, key, 0, 'json')
+            result = None
+            if data is not None:
+                try:
+                    raw = json.loads(data)
+                    result = (shapely.from_wkb(raw['roads']),
+                        [BuildingCandidate(shapely.from_wkb(c[0]), *c[1:]) for c in raw['buildings']],
+                        shapely.from_wkb(raw['bridges']))
+                except (ValueError, KeyError, TypeError, shapely.errors.GEOSException):
+                    pass
+            if result is None:
+                result = _fetch_infrastructure(frame, client, cache, token, mm_per_m, checkpoint=checkpoint)
+                roads, candidates, bridges = result
+                cache.set('derived', 'infrastructure-v1', 0, key, 0, 'json', json.dumps({
+                    'roads': roads.wkb_hex, 'bridges': bridges.wkb_hex,
+                    'buildings': [[c.footprint.wkb_hex, c.height, c.min_height, c.estimated_height]
+                                  for c in candidates]}).encode())
+                # Bound derived data independently of retained source tiles.
+                directory = cache.root / 'derived' / 'infrastructure-v1' / '0'
+                entries = []
+                for path in directory.glob('*/0.json'):
+                    try:
+                        entries.append((path.stat().st_mtime, path))
+                    except FileNotFoundError:
+                        pass
+                for _, path in sorted(entries, reverse=True)[32:]:
+                    path.unlink(missing_ok=True)
+
+        finally:
+            lock.release()
+    road_region, candidates, bridge_region = result
+    if include_roofs and candidates and cache is not None:
+        roof_features = fetch_roofs(frame, cache, mm_per_m)
+        roof_tree = shapely.STRtree([feature.footprint for feature in roof_features])
+        candidates = [c._replace(roof=matched_roof(c.footprint, roof_features, roof_tree, mm_per_m,
+                                                   c.height, c.min_height)) if not c.estimated_height else c
+                      for c in candidates]
+    return road_region, candidates, bridge_region
+
+
+def build_buildings(land: trimesh.Trimesh, candidates: list[BuildingCandidate], exclusion: shapely.Geometry, *, preview: bool = False, checkpoint: Callable[[], None] | None = None) -> tuple[trimesh.Trimesh | None, shapely.Geometry]:
     """Union adjacent building parts and trim route clearance before solid creation."""
+    checkpoint = checkpoint or (lambda: None)
     trimmed = []
     for candidate in candidates:
         polygon, height = candidate[:2]
         base = candidate[2] if len(candidate) > 2 else 0.0
         roof = getattr(candidate, "roof", None)
         for piece in _flatten_polygons(polygon.difference(exclusion)):
+            # Clipping can leave effectively zero-area triangles with nearly
+            # coincident vertices. These are numerical residue, not buildings.
+            if piece.area <= 1e-12:
+                continue
             trimmed.append((piece, height, base, roof))
     if not trimmed:
         return None, shapely.Polygon()
@@ -161,33 +231,37 @@ def build_buildings(land: trimesh.Trimesh, candidates: list[BuildingCandidate], 
     index = shapely.STRtree(regions)
     blocks = _flatten_polygons(shapely.union_all(regions))
     top = land.triangles[land.face_normals[:, 2] > 1e-8]
-    tree = shapely.STRtree(shapely.polygons(top[:, :, :2]))
+    top_polygons = shapely.polygons(top[:, :, :2])
+    tree = shapely.STRtree(top_polygons)
+    normals = np.cross(top[:, 1]-top[:, 0], top[:, 2]-top[:, 0])
     pieces, offsets, footprints = [], [], []
     floor = float(land.bounds[0, 2])
-    terrain_solid = md.Manifold(md.Mesh64(np.asarray(land.vertices, dtype=np.float64),
+    terrain_solid = None if preview else md.Manifold(md.Mesh64(np.asarray(land.vertices, dtype=np.float64),
                                          np.asarray(land.faces, dtype=np.uint64)))
     for block in blocks:
+        checkpoint()
         if not _printable(block):
             continue
         hits = tree.query(block, predicate='intersects')
         if not len(hits):
             continue
         # Evaluate terrain only inside the footprint, not remote triangle corners.
-        ground = -np.inf
-        for triangle in top[hits]:
-            clipped = shapely.Polygon(triangle[:, :2]).intersection(block)
-            xy = shapely.get_coordinates(clipped)
-            if not len(xy):
-                continue
-            normal = np.cross(triangle[1]-triangle[0], triangle[2]-triangle[0])
-            z = triangle[0, 2] - ((xy-triangle[0, :2]) @ normal[:2]) / normal[2]
-            ground = max(ground, float(z.max()))
+        clipped = shapely.intersection(top_polygons[hits], block)
+        xy, owners = shapely.get_coordinates(clipped, return_index=True)
+        if not len(xy):
+            continue
+        triangles = hits[owners]
+        delta = xy - top[triangles, 0, :2]
+        z = top[triangles, 0, 2] - np.einsum('ij,ij->i', delta, normals[triangles, :2]) / normals[triangles, 2]
+        ground = float(z.max())
         if not np.isfinite(ground):
             continue
         prisms = []
         for idx in index.query(block, predicate='intersects'):
             polygon, height, base, roof = trimmed[idx]
             for footprint in _flatten_polygons(polygon.intersection(block)):
+                if footprint.area <= 1e-12:
+                    continue
                 bottom = ground + base if base > 0 else floor
                 footprint = orient(footprint, sign=1.0)
                 rings = [np.asarray(ring.coords)[:-1, :2] for ring in (footprint.exterior, *footprint.interiors)]
@@ -198,7 +272,9 @@ def build_buildings(land: trimesh.Trimesh, candidates: list[BuildingCandidate], 
         if not prisms:
             continue
         solid = md.Manifold.batch_boolean(prisms, md.OpType.Add)
-        result = solid - terrain_solid
+        # Hidden foundations can overlap terrain in a display scene. Exports
+        # still subtract terrain and validate disjoint closed solids.
+        result = solid if preview else solid - terrain_solid
         if result.status() != md.Error.NoError:
             raise ValueError('Building solid construction failed')
         if result.is_empty():
@@ -208,7 +284,7 @@ def build_buildings(land: trimesh.Trimesh, candidates: list[BuildingCandidate], 
         result = result.simplify(0.0001)
         output = result.to_mesh64()
         part = trimesh.Trimesh(output.vert_properties[:, :3], output.tri_verts, process=False)
-        if not part.is_volume:
+        if not preview and not part.is_volume:
             raise ValueError('Building did not produce a closed positive solid')
         offset = np.zeros_like(part.vertices)
         offset[:, 2] = np.maximum(0, part.vertices[:, 2] - ground)

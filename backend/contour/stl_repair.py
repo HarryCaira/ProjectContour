@@ -17,10 +17,31 @@ MAX_DISPLACEMENT_MM = 0.0018
 def repair_candidates(mesh: trimesh.Trimesh):
     solid = md.Manifold(md.Mesh64(np.array(mesh.vertices, dtype=np.float64, order='C'),
                                 np.array(mesh.faces, dtype=np.uint64, order='C')))
-    if solid.status() != md.Error.NoError or solid.is_empty():
-        return
-    output = solid.simplify(STEP_MM).to_mesh64()
+    valid_solid = solid.status() == md.Error.NoError and not solid.is_empty()
+    # Near-collinear fans can be retriangulated during Manifold import, before
+    # simplification starts. If that already breaches the volume bound, first
+    # separate rounded contacts while preserving the original indexed topology.
+    direct_first = not valid_solid or abs(solid.volume() - mesh.volume) > abs(mesh.volume) * 0.0001
+    if direct_first and mesh.is_volume:
+        yield from _separate_contacts(mesh.copy(), mesh, 0.0)
+    if valid_solid:
+        # Keep the established fast path for dense terrain. Retry from the
+        # original solid so simplification error never accumulates.
+        for tolerance in (0.01 * STEP_MM, STEP_MM, 5 * STEP_MM):
+            for candidate in _regularized_candidates(solid, mesh, tolerance):
+                if abs(candidate.volume - mesh.volume) <= abs(mesh.volume) * 0.0001:
+                    yield candidate
+    if not direct_first and mesh.is_volume:
+        yield from _separate_contacts(mesh.copy(), mesh, 0.0)
+
+
+def _regularized_candidates(solid, mesh, tolerance):
+    output = solid.simplify(tolerance).to_mesh64()
     candidate = trimesh.Trimesh(output.vert_properties[:, :3], output.tri_verts, process=False)
+    yield from _separate_contacts(candidate, mesh, tolerance)
+
+
+def _separate_contacts(candidate, mesh, tolerance):
     if candidate.is_empty:
         return
     anchors = candidate.vertices.copy()
@@ -43,7 +64,7 @@ def repair_candidates(mesh: trimesh.Trimesh):
             rank[order] = np.arange(len(ids)) - starts
             # Distinct magnitudes also separate contacts with identical normals.
             amount = STEP_MM * (.5 + .5 * rank / counts[groups])
-            vertices[contacts] -= candidate.vertex_normals[contacts] * amount[:, None]
+            vertices[contacts] -= _contact_directions(candidate, ids) * amount[:, None]
         candidate.vertices = vertices
         collapsed = ~candidate.nondegenerate_faces(height=1e-8)
         if collapsed.any():
@@ -67,7 +88,7 @@ def repair_candidates(mesh: trimesh.Trimesh):
             vertices = candidate.vertices.copy()
             vertices[c] += direction * STEP_MM
             candidate.vertices = vertices
-        if np.linalg.norm(candidate.vertices - anchors, axis=1).max() > MAX_DISPLACEMENT_MM:
+        if np.linalg.norm(candidate.vertices - anchors, axis=1).max() > MAX_DISPLACEMENT_MM - tolerance:
             return
         # Reject repairs that materially inflate a genuinely tiny feature.
         # Each pass moves a vertex at most twice STEP_MM, plus float32 rounding.
@@ -92,3 +113,19 @@ def _remove_zero_area_shells(candidate: trimesh.Trimesh) -> None:
         keep = np.ones(len(candidate.faces), dtype=bool)
         keep[remove] = False
         candidate.update_faces(keep)
+
+
+def _contact_directions(mesh: trimesh.Trimesh, ids: np.ndarray) -> np.ndarray:
+    """Use a real adjacent face when angle-weighted vertex normals cancel."""
+    directions = mesh.vertex_normals[ids].copy()
+    lengths = np.linalg.norm(directions, axis=1)
+    weak = np.flatnonzero(lengths < 1e-12)
+    if len(weak):
+        incident = mesh.vertex_faces[ids[weak]]
+        for row, faces in zip(weak, incident):
+            faces = faces[faces >= 0]
+            if len(faces):
+                face = faces[np.argmax(mesh.area_faces[faces])]
+                directions[row] = mesh.face_normals[face]
+        lengths = np.linalg.norm(directions, axis=1)
+    return directions / np.maximum(lengths[:, None], 1e-30)

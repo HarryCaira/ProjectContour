@@ -190,3 +190,78 @@ def test_point_two_mm_road_is_separate_printable_solid():
     assert road is not None and road.is_volume and base.is_volume
     assert road.extents[1] == pytest.approx(.2,abs=1e-6)
     assert _validated_stl('roads',road)
+
+
+@pytest.mark.parametrize('exaggeration', [.5, 1, 2, 4])
+@pytest.mark.parametrize('slope', [0, .1])
+def test_building_height_above_ground_is_fixed_when_terrain_is_exaggerated(exaggeration, slope):
+    from contour.stl_export import _validated_stl
+    import io
+    land = trimesh.creation.box(extents=[10, 10, 2])
+    land.vertices[:, 2] += land.vertices[:, 0] * slope
+    land.vertices[:, 2] *= exaggeration
+    ground = (1 + slope) * exaggeration  # highest ground under this footprint
+    building, _ = build_buildings(land, [(box(-1, -1, 1, 1), 2)], shapely.Polygon())
+    assert building.bounds[1, 2] - ground == pytest.approx(2, abs=1e-6)
+    assert building.vertex_attributes['_route_offset'][:, 2].max() == pytest.approx(2, abs=1e-6)
+    exported = trimesh.load(io.BytesIO(_validated_stl('buildings', building)), file_type='stl')
+    assert exported.bounds[1, 2] - ground == pytest.approx(2, abs=1e-6)
+
+
+def test_clipped_building_dust_does_not_break_connected_block():
+    from contour.stl_export import _validated_stl
+    # A real clipping remnant: the first two vertices differ by 3e-15 mm.
+    dust = shapely.Polygon([(52.25642967727869, -19.87269952689516),
+                            (52.25642967727869, -19.872699526895158),
+                            (52.25411159811112, -19.891257753612123)])
+    land = trimesh.creation.box(extents=[120,120,2])
+    building = box(52,-20,53,-19)
+    result, coverage = build_buildings(land, [(building,1), (dust,1)], shapely.Polygon())
+    assert coverage.equals(building)
+    assert result.is_volume
+    assert result.volume == pytest.approx(1, abs=1e-6)
+    assert _validated_stl('buildings',result)
+
+
+def test_preview_building_matches_export_roof_and_ground_on_slope():
+    from contour.infrastructure import BuildingCandidate
+    land = trimesh.creation.box(extents=[10, 10, 2])
+    land.vertices[:, 2] += land.vertices[:, 0] * .15 + 2
+    candidates = [BuildingCandidate(box(-1, -1, 1, 1), .8)]
+    preview, coverage = build_buildings(land, candidates, shapely.Polygon(), preview=True)
+    exported, export_coverage = build_buildings(land, candidates, shapely.Polygon())
+    assert coverage.equals(export_coverage)
+    assert preview.bounds[1, 2] == pytest.approx(exported.bounds[1, 2])
+    assert preview.vertex_attributes['_route_offset'][:, 2].max() == pytest.approx(.8)
+    # Only the hidden foundation differs; the exact export remains disjoint.
+    assert trimesh.boolean.intersection([land, preview], engine='manifold').volume > 0
+    overlap = trimesh.boolean.intersection([land, exported], engine='manifold')
+    assert overlap.is_empty or abs(overlap.volume) < 1e-5
+
+
+def test_projected_infrastructure_shared_between_coverage_and_preview(tmp_path, monkeypatch):
+    import contour.infrastructure as module
+    from contour.hex_frame import HexFrame
+    from contour.tile_cache import TileCache
+    calls = []
+    def source(*args, **kwargs):
+        calls.append(args[4])
+        return box(0, 0, 1, 1), [module.BuildingCandidate(box(2, 2, 3, 3), 1)], shapely.Polygon()
+    monkeypatch.setattr(module, '_fetch_infrastructure', source)
+    monkeypatch.setattr(module, 'fetch_roofs', lambda *args: [])
+    frame, cache = HexFrame(0, 0, 100), TileCache(tmp_path)
+    coverage = module.fetch_infrastructure(frame, None, cache, '', .1, include_roofs=False)
+    preview = module.fetch_infrastructure(frame, None, cache, '', .1)
+    assert len(calls) == 1
+    assert coverage[0].equals(preview[0])
+    assert coverage[1] == preview[1]
+    module.fetch_infrastructure(frame, None, cache, '', .15)
+    assert len(calls) == 2
+
+
+def test_building_generation_can_be_cancelled():
+    def cancelled():
+        raise InterruptedError('cancelled')
+    with pytest.raises(InterruptedError):
+        build_buildings(trimesh.creation.box(), [(box(-.4, -.4, .4, .4), 1)],
+                        shapely.Polygon(), preview=True, checkpoint=cancelled)

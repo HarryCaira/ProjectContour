@@ -51,7 +51,11 @@ interface RouteVertices {
   offsets?: Float32Array;
   building?: boolean;
 }
-const routeTransforms = new WeakMap<Group, { pivot: number; routes: RouteVertices[] }>();
+// Keep this on the model, not in module state: Fast Refresh can replace this
+// module while React retains the loaded model. A symbol avoids serialising
+// mesh references through userData when measuring/cloning the scene.
+const routeTransformsKey = Symbol.for("contour.routeTransforms");
+type TransformedGroup = Group & { [routeTransformsKey]?: { pivot: number; routes: RouteVertices[] } };
 
 /** Centre the complete kit before scaling metres into viewer units. */
 export function normaliseKit(scene: Group): Group {
@@ -123,7 +127,7 @@ export function normaliseKit(scene: Group): Group {
   const normalised = new Group();
   normalised.scale.setScalar(2 / longest);
   normalised.add(centred);
-  routeTransforms.set(normalised, { pivot, routes });
+  (normalised as TransformedGroup)[routeTransformsKey] = { pivot, routes };
   return normalised;
 }
 
@@ -132,7 +136,7 @@ export function setKitExaggeration(root: Group, exaggeration: number, widthScale
   const relief = root.getObjectByName("contour-relief");
   if (!relief) throw new Error("The model has no terrain transform.");
   relief.scale.z = exaggeration;
-  const transform = routeTransforms.get(root);
+  const transform = (root as TransformedGroup)[routeTransformsKey];
   if (transform) {
     for (const { mesh, original, base, offsets, building } of transform.routes) {
       const positions = mesh.geometry.attributes.position;
@@ -162,7 +166,7 @@ export function measureKit(root: Group, physicalSizeMm: number): { bounds: Box3;
 
 /** Change surface colours without rebuilding or modifying geometry. */
 export function setKitColours(root: Group, colours: ModelColours): void {
-  const parts = { land: colours.terrain, water: colours.water, route: colours.route, roads: colours.roads, buildings: colours.buildings };
+  const parts = { plinth: colours.base, land: colours.terrain, water: colours.water, route: colours.route, roads: colours.roads, buildings: colours.buildings };
   root.traverse((object) => {
     if (!(object instanceof Mesh)) return;
     const colour = parts[object.name as keyof typeof parts];

@@ -11,7 +11,7 @@ from threading import Event
 
 from contour.errors import ContourError
 from contour.gltf_export import to_glb
-from contour.preview_mesh import display_kit
+from contour.preview_cache import cached_preview
 from contour.pipeline import PipelineDependencies, build_kit
 from contour.route import Route
 from contour.settings import Settings
@@ -28,27 +28,32 @@ async def stream_mesh(settings: Settings, route: Route, deps: PipelineDependenci
 
     last_stage: str | None = None
 
-    def progress(stage: str) -> None:
-        nonlocal last_stage
+    def checkpoint() -> None:
         if cancelled.is_set():
             raise InterruptedError("Preview request cancelled")
+
+    def progress(stage: str) -> None:
+        nonlocal last_stage
+        checkpoint()
         if stage != last_stage:
             last_stage = stage
             send({"type": "progress", "stage": stage})
 
     def build() -> None:
         try:
-            kit = build_kit(settings, route, deps, on_progress=progress)
-            progress("preview")
-            kit = display_kit(kit)
-            glb = to_glb(kit)
-            send({
-                "type": "result", "binary": glb,
-                "metadata": {
-                    "parts": [part.name for part in kit.parts],
-                    "triangles": [len(part.mesh.faces) for part in kit.parts],
-                },
-            })
+            def generate():
+                kit = build_kit(settings, route, deps, on_progress=progress, preview=True)
+                progress("preview")
+                glb = to_glb(kit)
+                return {
+                    "type": "result", "binary": glb,
+                    "metadata": {
+                        "parts": [part.name for part in kit.parts],
+                        "triangles": [len(part.mesh.faces) for part in kit.parts],
+                    },
+                }
+            send(cached_preview(settings, route, deps, generate,
+                                checkpoint))
         except InterruptedError:
             return
         except ContourError as error:

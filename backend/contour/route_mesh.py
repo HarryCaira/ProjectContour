@@ -161,7 +161,10 @@ def build_route_mesh(
     # Per-vertex displacement from the route's terrain centreline. The viewer
     # can change width/height without rebuilding terrain or downloading a GLB.
     centres = np.repeat(np.column_stack((pts_2d, terrain_z)), 4, axis=0)
-    mesh = trimesh.Trimesh(vertices=vertices, faces=np.array(faces, dtype=np.int64), process=True,
+    # Retraced paths can share positions without sharing ribbon topology.
+    # Welding them here creates non-manifold edges; retain the indexed sections
+    # so bounded STL contact regularization can handle coincident positions.
+    mesh = trimesh.Trimesh(vertices=vertices, faces=np.array(faces, dtype=np.int64), process=False,
                            vertex_attributes={"_route_offset": vertices - centres})
     mesh.fix_normals()
     if mesh.volume < 0:

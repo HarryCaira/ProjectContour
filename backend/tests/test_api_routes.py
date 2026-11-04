@@ -334,3 +334,19 @@ def test_feature_coverage_uses_physical_scale_and_excludes_water(client, monkeyp
 def test_feature_coverage_validates_source(client):
     response = client.post("/coverage", json={"source": {"id": "missing", "sha256": "a" * 64}})
     assert response.status_code == 404
+
+
+def test_export_geometry_failure_returns_readable_error_with_cors(client, monkeypatch):
+    from shapely.errors import GEOSException
+    def fail(*args, **kwargs):
+        raise GEOSException('provider secret must not escape')
+    monkeypatch.setattr('contour.api.build_kit', fail)
+    upload = client.post('/upload', files={'file': ('track.gpx', SIMPLE_GPX)}).json()
+    response = client.post('/export', json={
+        'source': {'id': upload['id'], 'sha256': upload['sha256']},
+    }, headers={'Origin': 'http://localhost:3000'})
+    assert response.status_code == 422
+    assert response.headers['access-control-allow-origin'] == 'http://localhost:3000'
+    assert response.json()['code'] == 'geometry_error'
+    assert 'surface boundaries' in response.json()['message']
+    assert 'secret' not in response.text

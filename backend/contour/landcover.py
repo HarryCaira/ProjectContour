@@ -43,8 +43,18 @@ def fetch_landcover_regions(frame: HexFrame, client: HttpClient, cache: TileCach
     return merged
 
 
-def fetch_landcover(frame: HexFrame, client: HttpClient, cache: TileCache, token: str) -> dict:
-    result = coverage_preview(fetch_landcover_regions(frame, client, cache, token), frame.polygon_enu())
+def fetch_landcover(frame: HexFrame, client: HttpClient, cache: TileCache, token: str, size_mm: float = 100) -> dict:
+    from shapely.affinity import scale
+    from contour.rock_transition import natural_rock_region
+    regions = fetch_landcover_regions(frame, client, cache, token)
+    domain = frame.polygon_enu()
+    bounds = domain.bounds
+    factor = size_mm / max(bounds[2] - bounds[0], bounds[3] - bounds[1])
+    rock = natural_rock_region(scale(regions['rock'], factor, factor, origin=(0, 0)),
+                               scale(domain, factor, factor, origin=(0, 0)),
+                               scale(regions['water'], factor, factor, origin=(0, 0)))
+    regions['rock'] = scale(rock, 1 / factor, 1 / factor, origin=(0, 0))
+    result = coverage_preview(regions, domain)
     result["zoom"] = vector_zoom(frame)
     return result
 

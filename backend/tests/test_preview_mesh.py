@@ -1,12 +1,21 @@
 import numpy as np
+import pytest
+import manifold3d
 import trimesh
 from contour.kit import MeshKit, KitPart, Material
 import contour.preview_mesh as preview
 
 
-def test_large_display_reduction_keeps_print_source_and_route_attributes(monkeypatch):
+@pytest.mark.parametrize("native_buffers", [False, True])
+def test_large_display_reduction_keeps_print_source_and_route_attributes(monkeypatch, native_buffers):
     monkeypatch.setattr(preview, 'PREVIEW_TRIGGER_FACES', 0)
     land=trimesh.creation.icosphere(subdivisions=7,radius=10)
+    if native_buffers:
+        data = manifold3d.Manifold(manifold3d.Mesh64(
+            np.array(land.vertices, dtype=np.float64),
+            np.array(land.faces, dtype=np.uint64))).to_mesh64()
+        land = trimesh.Trimesh(vertices=np.asarray(data.vert_properties)[:, :3],
+                               faces=np.asarray(data.tri_verts), process=False)
     vertices,faces=land.vertices.copy(),land.faces.copy()
     route=trimesh.creation.box()
     route.vertex_attributes['_route_offset']=np.ones((len(route.vertices),3))

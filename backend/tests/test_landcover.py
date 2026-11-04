@@ -42,7 +42,8 @@ def test_fetch_reads_only_mapped_classes_and_resolves_overlaps(monkeypatch, tmp_
     result = coverage.fetch_landcover(frame, object(), TileCache(tmp_path), 'test')
     area = frame.polygon_enu().area
     assert result['percentages']['wood'] == round(100*wood.difference(rock.union(water)).area/area,2)
-    assert result['percentages']['rock'] == round(100*rock.difference(water).area/area,2)
+    # The preview now contains a narrow, printable inward rock transition.
+    assert 0 < result['percentages']['rock'] < round(100*rock.difference(water).area/area,2)
 
 
 def test_woodland_edge_distance_increases_towards_interior():

@@ -80,7 +80,7 @@ export function KitMesh({ coverEnabled, snow, glb, landCover, meshSizeMm, modelR
       }
     }, fail);
     return () => { cancelled = true; if (loadedRoot) disposeKit(loadedRoot); };
-  }, [glb, onError]);
+  }, [glb, onError, normaliseKit]);
 
   useLayoutEffect(() => {
     if (root) {

@@ -23,7 +23,7 @@ export function Scene() {
   const meshQuery = useMesh(settings);
   const showLandCover = !!settings && (settings.biomes.woodland.enabled || settings.biomes.rock.enabled);
   const coverQuery = useQuery({
-    queryKey: ["landcover-edge-v3", settings?.source, settings?.framing],
+    queryKey: ["landcover-edge-v6", settings?.source, settings?.framing, settings?.physical.sizeMm],
     queryFn: ({ signal }) => fetchLandCover(settings!, signal),
     enabled: !!settings && showLandCover,
     staleTime: Infinity, retry: false,
@@ -43,7 +43,7 @@ export function Scene() {
         <Environment preset="apartment" />
         {meshQuery.data ? (
           <KitMesh
-            key={meshQuery.dataUpdatedAt}
+            key={`transforms-v2-${meshQuery.dataUpdatedAt}`}
             glb={meshQuery.data.glb}
             snow={settings?.biomes.snow}
             coverEnabled={{ woodland: settings?.biomes.woodland.enabled ?? false, rock: settings?.biomes.rock.enabled ?? false }}
